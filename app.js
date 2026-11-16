@@ -309,7 +309,9 @@ function edits1(word) {
   return Object.keys(out);
 }
 function correctToken(tok, v) {
-  if (v[tok] || tok.length < 3 || /^\d+$/.test(tok)) return null;
+  /* Bỏ qua token chứa chữ số (mã HS, số hiệu, mã thép như sus304):
+     "sửa" chúng dễ đổi sang một mã khác hẳn (sus304 → sus201). */
+  if (v[tok] || tok.length < 3 || /\d/.test(tok)) return null;
   var best = null, bestF = 0, i, j;
   var c1 = edits1(tok);
   for (i = 0; i < c1.length; i++) {
@@ -724,7 +726,7 @@ function renderList() {
   }
   var html = '';
   var corr = state.query ? didYouMean(state.query) : null;
-  if (corr && results.length <= 3) {
+  if (corr) {
     html += '<p class="did-you-mean">Có phải bạn muốn tìm: <button type="button" class="dym-btn" data-q="' +
       esc(corr) + '">' + esc(corr) + '</button>?</p>';
   }
@@ -1114,11 +1116,18 @@ function boot() {
         hideSuggestions();
         commitSearch(q.value);
       } else if (e.key === 'Escape') {
-        hideSuggestions();
-        q.value = _qBeforeNav;
-        state.query = _qBeforeNav; state.shown = PAGE_SIZE;
-        syncQueryToUrl();
-        renderList();
+        /* Ngăn hành vi mặc định của Chrome với input type=search (Esc xóa
+           sạch ô nhập). Chỉ xử lý khi dropdown đang mở; dropdown đã đóng
+           thì Esc không làm gì (tránh khôi phục nhầm truy vấn cũ). */
+        e.preventDefault();
+        e.stopPropagation();
+        if (!$('#suggest').hidden) {
+          hideSuggestions();
+          q.value = _qBeforeNav;
+          state.query = _qBeforeNav; state.shown = PAGE_SIZE;
+          syncQueryToUrl();
+          renderList();
+        }
       }
     });
     document.addEventListener('click', function (e) {
