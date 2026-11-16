@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-16T16:58:33+07:00",
-  "generated_at_display": "16/11/2026 16:58",
+  "generated_at": "2026-11-16T17:26:30+07:00",
+  "generated_at_display": "16/11/2026 17:26",
   "total": 522,
   "with_hs": 497,
   "counts_by_loai": {
@@ -12,5 +12,5 @@
     "2025": 258,
     "2026": 264
   },
-  "drive_mapped": 236
+  "drive_mapped": 500
 }
