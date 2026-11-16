@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Văn bản XNK — Kết quả phân tích phân loại</title>
+<meta name="description" content="Tra cứu kết quả phân tích phân loại và xác định trước mã số hải quan — kho Văn bản XNK. Tìm không cần gõ chính xác: không dấu, sai chính tả nhẹ, số hiệu hoặc mã HS dở dang đều ra.">
+<meta property="og:title" content="Văn bản XNK — Kết quả phân tích phân loại">
+<meta property="og:description" content="Tra cứu kết quả phân tích phân loại và xác định trước mã số hải quan — kho Văn bản XNK.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#/">Văn bản XNK</a>
+    <p class="tagline">Kết quả phân tích phân loại &amp; xác định trước mã số hải quan</p>
+    <p class="meta-line"><b id="totalCount">…</b> văn bản · Cập nhật lần cuối: <span id="updatedAt">…</span></p>
+    <nav>
+      <a href="#/">Mới nhất</a>
+      <a href="#/chuong">Duyệt theo chương HS</a>
+      <a href="https://www.facebook.com/tiepvanhoangkim1/" target="_blank" rel="noopener">Fanpage Văn bản XNK</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="search-box" aria-label="Tìm kiếm">
+    <label for="q">Tìm kiếm văn bản</label>
+    <input id="q" type="search" placeholder="Ví dụ: vải sofa, thép tròn, 3504, 1397, whey protein…" autocomplete="off" aria-describedby="resultInfo">
+    <div id="suggest" class="suggest" hidden></div>
+    <div class="chips">
+      <span>Gợi ý:</span>
+      <button type="button" class="chip" data-q="vải sofa">vải sofa</button>
+      <button type="button" class="chip" data-q="thép">thép</button>
+      <button type="button" class="chip" data-q="3504">3504</button>
+      <button type="button" class="chip" data-q="1397">1397</button>
+      <button type="button" class="chip" data-q="whey protein">whey protein</button>
+    </div>
+    <div class="filters">
+      <select id="fLoai" aria-label="Loại văn bản">
+        <option value="">Tất cả loại văn bản</option>
+        <option value="phan_tich_phan_loai">Phân tích phân loại</option>
+        <option value="xac_dinh_truoc_ma_so">Xác định trước mã số</option>
+        <option value="khac">Văn bản khác</option>
+      </select>
+      <select id="fChuong" aria-label="Chương HS">
+        <option value="">Tất cả chương HS</option>
+      </select>
+      <select id="fNam" aria-label="Năm ban hành">
+        <option value="">Tất cả các năm</option>
+      </select>
+      <button type="button" id="clearFilters">Xóa lọc</button>
+    </div>
+    <p id="resultInfo" class="result-info">Đang tải dữ liệu…</p>
+  </section>
+
+  <div id="view"></div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Dữ liệu là kết quả phân tích phân loại và xác định trước mã số do Tổng cục Hải quan công bố.
+    Trang này chỉ tổng hợp lại để tra cứu, không thay thế văn bản gốc.
+    Xem danh sách gốc tại <a href="https://www.customs.gov.vn/index.jsp?pageId=8&amp;cid=1294&amp;LinhVuc=313" target="_blank" rel="noopener">customs.gov.vn</a>.</p>
+    <p>Fanpage: <a href="https://www.facebook.com/tiepvanhoangkim1/" target="_blank" rel="noopener">Văn bản XNK</a> ·
+    Nội dung công khai, chia sẻ tự do kèm nguồn.</p>
+  </div>
+</footer>
+
+<noscript><p style="padding:16px;text-align:center">Trang tra cứu cần bật JavaScript để tìm kiếm.</p></noscript>
+<script src="app.js"></script>
+</body>
+</html>
