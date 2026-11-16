@@ -189,3 +189,32 @@ mark { background: #ffe08a; padding: 0 2px; border-radius: 3px; }
   .brand-logo { width: 36px; height: 36px; }
   .article { padding: 14px; }
 }
+
+/* Tìm kiếm v2: gợi ý nhóm, "Ý bạn là", trang 0 kết quả, tìm liên quan */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.sugg-group {
+  padding: 8px 14px 2px; font-size: .78rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
+}
+.suggest button { min-height: 44px; }
+.did-you-mean {
+  background: var(--accent-light); border: 1px solid #bfe3d2;
+  border-radius: 8px; padding: 10px 14px; margin: 0 0 12px;
+}
+.dym-btn {
+  background: none; border: 0; color: var(--navy); font-weight: 700;
+  font-size: 1rem; cursor: pointer; text-decoration: underline; padding: 0;
+}
+.dym-btn:hover { color: var(--accent); }
+.zero-recovery h2 { font-size: 1.15rem; margin: 4px 0 10px; }
+.zero-recovery h3 { font-size: 1.02rem; margin: 18px 0 8px; }
+.zero-recovery .btn { margin-top: 4px; }
+.relaxed-note { color: var(--muted); margin: 12px 0 8px; }
+.related-search {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 14px 0 20px;
+}
+.related-search span { color: var(--muted); font-size: .88rem; }

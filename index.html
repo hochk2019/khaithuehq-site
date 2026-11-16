@@ -30,10 +30,11 @@
 <main class="wrap">
   <section class="search-box" aria-label="Tìm kiếm">
     <label for="q">Tìm kiếm văn bản</label>
-    <input id="q" type="search" placeholder="Ví dụ: vải sofa, thép tròn, 3504, 1397, whey protein…" autocomplete="off" aria-describedby="resultInfo">
-    <div id="suggest" class="suggest" hidden></div>
+    <input id="q" type="search" placeholder="Ví dụ: vải sofa, thép tròn, 3504, 1397, whey protein…" autocomplete="off" aria-describedby="resultInfo" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+    <div id="suggest" class="suggest" role="listbox" hidden></div>
+    <p id="suggestStatus" class="sr-only" aria-live="polite"></p>
     <div class="chips">
-      <span>Gợi ý:</span>
+      <span>Tìm nhiều:</span>
       <button type="button" class="chip" data-q="vải sofa">vải sofa</button>
       <button type="button" class="chip" data-q="thép">thép</button>
       <button type="button" class="chip" data-q="3504">3504</button>

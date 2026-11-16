@@ -144,9 +144,16 @@ function fuzzyWord(token, words) {
 function searchDocs(query, filters) {
   filters = filters || {};
   var q = norm(query);
-  var tokens = q.split(' ').filter(function (t) {
-    return t.length >= 2 || /^\d+$/.test(t);
-  });
+  var tokens;
+  if (/^[\d. ]+$/.test(String(query).trim()) && q.replace(/\D/g, '').length >= 2) {
+    /* Chỉ gõ số/chấm (vd. "3504.00.00", "3504 00"): coi cả dãy số là MỘT
+       token mã HS, không tách thành "3504", "00", "00". */
+    tokens = [q.replace(/\D/g, '')];
+  } else {
+    tokens = q.split(' ').filter(function (t) {
+      return t.length >= 2 || /^\d+$/.test(t);
+    });
+  }
   /* Mở rộng từ đồng nghĩa: cụm từ trong câu truy vấn kích hoạt thêm từ khóa. */
   var extra = [];
   Object.keys(SYN).forEach(function (key) {
@@ -207,6 +214,21 @@ function searchDocs(query, filters) {
       }
       if (!matched) { ok = false; break; }
     }
+    /* Khớp nguyên cụm trong tên hàng/tóm tắt (vd. "vai sofa" khớp cả cụm
+       thì hơn khớp rời 2 từ ở 2 chỗ). */
+    if (q.length >= 5) {
+      if (x.nProd.indexOf(q) !== -1) { score += 30; reasons.push('Cụm từ khớp'); }
+      else if (x.nSum.indexOf(q) !== -1) { score += 12; reasons.push('Cụm từ khớp'); }
+    }
+    /* Định danh tuyệt đối: gõ đúng một số hiệu / mã HS đầy đủ thì văn bản
+       đó luôn đứng đầu, bất kể các token khác. */
+    if (tokens.length === 1 && /^\d+$/.test(tokens[0])) {
+      if (x.soNum === tokens[0] || x.hs === tokens[0]) score += 1000;
+    }
+    /* Tín hiệu hành vi trên chính máy người dùng (localStorage): văn bản
+       đã mở sau khi tìm thì tăng hạng nhẹ, tối đa +5. */
+    var cb = clickBoost(i);
+    if (cb) score += cb;
     if (ok) out.push({ doc: d, score: score, reasons: reasons, i: i });
   }
   out.sort(function (a, b) {
@@ -216,40 +238,256 @@ function searchDocs(query, filters) {
   return out;
 }
 
-/* Gợi ý khi đang gõ: số hiệu, mã HS, từ tên hàng phổ biến. */
+/* ================= Gần đây & lượt mở (chỉ trên máy này) ================= */
+/* Lưu trong localStorage, không gửi đi đâu — giữ đúng cam kết không theo dõi. */
+function lsGet(key) {
+  try { if (typeof localStorage === 'undefined') return null; return localStorage.getItem(key); }
+  catch (e) { return null; }
+}
+function lsSet(key, val) {
+  try { if (typeof localStorage === 'undefined') return; localStorage.setItem(key, val); }
+  catch (e) { /* bộ nhớ đầy / chế độ riêng tư: bỏ qua */ }
+}
+var _recents = null, _clicks = null;
+function recents() {
+  if (_recents) return _recents;
+  try { _recents = JSON.parse(lsGet('vbxnk_recents_v1') || '[]'); } catch (e) { _recents = []; }
+  if (!Array.isArray(_recents)) _recents = [];
+  return _recents;
+}
+function recordRecent(q) {
+  var s = String(q || '').trim();
+  if (s.length < 2) return;
+  var r = recents().filter(function (x) { return norm(x) !== norm(s); });
+  r.unshift(s);
+  _recents = r.slice(0, 5);
+  lsSet('vbxnk_recents_v1', JSON.stringify(_recents));
+}
+function clickMap() {
+  if (_clicks) return _clicks;
+  try { _clicks = JSON.parse(lsGet('vbxnk_clicks_v1') || '{}'); } catch (e) { _clicks = {}; }
+  return _clicks;
+}
+function recordClick(ma) {
+  var m = clickMap();
+  m[String(ma)] = Math.min((m[String(ma)] || 0) + 1, 20);
+  lsSet('vbxnk_clicks_v1', JSON.stringify(m));
+}
+function clickBoost(i) {
+  var m = clickMap();
+  var c = m[String(DOCS[i].ma)] || 0;
+  return Math.min(c, 5);
+}
+
+/* ================= Từ vựng kho & "Ý bạn là" ================= */
+/* Từ điển ở đây là từ vựng của chính kho văn bản (từ trong tên hàng +
+   tóm tắt), kèm tần suất xuất hiện — kiểu Peter Norvig: từ gõ sai không
+   có trong từ vựng nhưng gần 1 từ trong kho (sửa 1–2 ký tự) thì gần như
+   chắc chắn là lỗi gõ của từ đó. Chạy trên chuỗi đã chuẩn hóa không dấu. */
+var _vocab = null;
+function buildVocab() {
+  _vocab = {};
+  IDX.forEach(function (x) {
+    x.words.forEach(function (w) { _vocab[w] = (_vocab[w] || 0) + 1; });
+  });
+  return _vocab;
+}
+function vocab() { return _vocab || buildVocab(); }
+
+var _ALPHA = 'abcdefghijklmnopqrstuvwxyz';
+function edits1(word) {
+  var out = {}, i, c;
+  for (i = 0; i < word.length; i++) out[word.slice(0, i) + word.slice(i + 1)] = true;
+  for (i = 0; i < word.length - 1; i++)
+    out[word.slice(0, i) + word[i + 1] + word[i] + word.slice(i + 2)] = true;
+  for (i = 0; i < word.length; i++)
+    for (c = 0; c < _ALPHA.length; c++)
+      out[word.slice(0, i) + _ALPHA[c] + word.slice(i + 1)] = true;
+  for (i = 0; i <= word.length; i++)
+    for (c = 0; c < _ALPHA.length; c++)
+      out[word.slice(0, i) + _ALPHA[c] + word.slice(i)] = true;
+  return Object.keys(out);
+}
+function correctToken(tok, v) {
+  if (v[tok] || tok.length < 3 || /^\d+$/.test(tok)) return null;
+  var best = null, bestF = 0, i, j;
+  var c1 = edits1(tok);
+  for (i = 0; i < c1.length; i++) {
+    if (v[c1[i]] && v[c1[i]] > bestF) { bestF = v[c1[i]]; best = c1[i]; }
+  }
+  if (best) return best;
+  if (tok.length >= 6) { /* thử 2 lần sửa, chỉ qua nhánh xóa (lỗi thiếu chữ) */
+    for (i = 0; i < tok.length; i++) {
+      var del = tok.slice(0, i) + tok.slice(i + 1);
+      var c2 = edits1(del);
+      for (j = 0; j < c2.length; j++) {
+        if (v[c2[j]] && v[c2[j]] > bestF) { bestF = v[c2[j]]; best = c2[j]; }
+      }
+      if (bestF >= 3) break; /* đủ tin thì dừng sớm */
+    }
+  }
+  return best;
+}
+/* Trả về truy vấn đã sửa, hoặc null nếu không có gợi ý sửa đáng tin. */
+function didYouMean(query) {
+  var v = vocab();
+  var toks = norm(query).split(' ').filter(Boolean);
+  if (!toks.length) return null;
+  var fixed = toks.map(function (t) { return correctToken(t, v) || t; });
+  var out = fixed.join(' ');
+  return out !== norm(query) ? out : null;
+}
+
+/* Nới truy vấn khi 0 kết quả: bỏ token ít gặp nhất trong kho rồi tìm lại. */
+function relaxedSearch(q) {
+  var toks = norm(q).split(' ').filter(Boolean);
+  if (toks.length < 2) return null;
+  var v = vocab();
+  var drop = null, dropF = Infinity;
+  toks.forEach(function (t) {
+    var f = /^\d+$/.test(t) ? Infinity : (v[t] || 0);
+    if (f < dropF) { dropF = f; drop = t; }
+  });
+  if (!drop || dropF === Infinity) return null;
+  var rest = toks.filter(function (t) { return t !== drop; }).join(' ');
+  var results = searchDocs(rest, { loai: state.loai, chapter: state.chapter, year: state.year });
+  return results.length ? { dropped: drop, results: results } : null;
+}
+
+/* "Tìm kiếm liên quan" kiểu Shopee: cụm từ trong tên hàng của các kết quả
+   đầu, chứa ít nhất 1 từ truy vấn nhưng khác truy vấn — vd. gõ "vải" thì
+   gợi ý "vải sofa", "vải dệt thoi". */
+function relatedSearches(results, tokens) {
+  if (!tokens.length || results.length < 2) return [];
+  if (tokens.every(function (t) { return /^\d+$/.test(t); })) return [];
+  var counts = {};
+  results.slice(0, 10).forEach(function (r) {
+    var x = IDX[r.i];
+    if (!x) return;
+    var pw = x.nProd.split(' ').filter(function (w) { return w.length >= 3; });
+    for (var j = 0; j + 1 < pw.length; j++) {
+      var bg = pw[j] + ' ' + pw[j + 1];
+      if (bg === norm(state.query)) continue;
+      var hit = false;
+      tokens.forEach(function (t) { if (bg.indexOf(t) !== -1) hit = true; });
+      if (hit) counts[bg] = (counts[bg] || 0) + 1;
+    }
+  });
+  return Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 5);
+}
+
+function chapterCount(ch) {
+  var n = 0;
+  IDX.forEach(function (x) { if (x.chapter === ch) n++; });
+  return n;
+}
+
+/* Gợi ý khi đang gõ: nhóm theo loại (như Google/Shopee) — tìm gần đây,
+   số hiệu (mở thẳng văn bản), mã HS, chương HS, cụm từ mặt hàng.
+   Mọi gợi ý đều dẫn tới ít nhất 1 văn bản, không bao giờ gợi ý 0 kết quả. */
 var _suggestPool = null;
 function suggestPool() {
   if (_suggestPool) return _suggestPool;
-  var so = {}, hs = {}, words = {};
+  var so = {}, hs = {}, words = {}, phrases = {}, chapters = {};
   DOCS.forEach(function (d, i) {
-    so[d.so_hieu] = true;
-    if (d.ma_hs) hs[d.ma_hs] = true;
-    IDX[i].nProd.split(' ').forEach(function (w) {
-      if (w.length >= 3) words[w] = (words[w] || 0) + 1;
-    });
+    so[d.so_hieu] = d.ma;
+    if (d.ma_hs) hs[d.ma_hs] = (hs[d.ma_hs] || 0) + 1;
+    var ch = IDX[i].chapter;
+    if (ch) chapters[ch] = (chapters[ch] || 0) + 1;
+    var pw = IDX[i].nProd.split(' ').filter(function (w) { return w.length >= 3; });
+    pw.forEach(function (w) { words[w] = (words[w] || 0) + 1; });
+    for (var k = 0; k + 1 < pw.length; k++) {
+      var bg = pw[k] + ' ' + pw[k + 1];
+      phrases[bg] = (phrases[bg] || 0) + 1;
+    }
   });
   _suggestPool = {
     so: Object.keys(so).sort(),
+    soMa: so,
     hs: Object.keys(hs).sort(),
-    words: Object.keys(words).sort(function (a, b) { return words[b] - words[a]; }).slice(0, 300)
+    hsCount: hs,
+    chapters: chapters,
+    /* Giữ toàn bộ từ/cụm (đã xếp theo tần suất) để gợi ý tiền tố không bị
+       cắt mất cụm ít gặp nhưng đúng ý người gõ (vd. "vai sofa" chỉ 3 bài). */
+    words: Object.keys(words).sort(function (a, b) { return words[b] - words[a]; }),
+    wordCount: words,
+    phrases: Object.keys(phrases).sort(function (a, b) { return phrases[b] - phrases[a]; }),
+    phraseCount: phrases
   };
   return _suggestPool;
 }
 
+/* Mỗi gợi ý: {text, kind, group, action, ma?, chapter?, count?}.
+   action: 'search' (chạy tìm kiếm) | 'open' (mở thẳng văn bản) | 'chapter'. */
 function suggest(query) {
   var q = norm(query);
-  if (q.length < 2) return [];
   var pool = suggestPool(), out = [];
-  pool.so.forEach(function (s) {
-    if (out.length < 8 && norm(s).indexOf(q) !== -1) out.push({ text: s, kind: 'Số hiệu' });
+  /* Giới hạn mỗi nhóm để không nhóm nào chiếm hết dropdown (vd. gõ "35"
+     mà 8 mục toàn số hiệu chứa "35" thì mã HS/chương HS không còn chỗ). */
+  var caps = q ? { 'Tìm gần đây': 2, 'Văn bản': 3, 'Mã HS': 3, 'Chương HS': 1, 'Mặt hàng': 4, 'Tìm nhiều': 6 }
+               : { 'Tìm gần đây': 5, 'Tìm nhiều': 3 };
+  var counts = {};
+  function push(text, kind, group, action, extra) {
+    if (out.length >= 8) return;
+    if ((counts[group] || 0) >= (caps[group] || 8)) return;
+    counts[group] = (counts[group] || 0) + 1;
+    var it = { text: text, kind: kind, group: group, action: action || 'search' };
+    if (extra) for (var k in extra) it[k] = extra[k];
+    out.push(it);
+  }
+  /* Ô trống: hiện "Tìm nhiều" (cụm phổ biến trong kho) + tìm gần đây. */
+  if (!q) {
+    recents().forEach(function (r) { push(r, 'Tìm gần đây', 'Tìm gần đây'); });
+    pool.phrases.slice(0, 6).forEach(function (p) {
+      push(p, 'Mặt hàng · ' + (pool.phraseCount[p] || 0) + ' văn bản', 'Tìm nhiều');
+    });
+    return out;
+  }
+  /* Tìm gần đây khớp tiền tố — luôn đứng đầu, như Google. */
+  recents().forEach(function (r) {
+    if (norm(r).indexOf(q) === 0) push(r, 'Tìm gần đây', 'Tìm gần đây');
   });
-  pool.hs.forEach(function (s) {
-    if (out.length < 8 && hsDigits(s).indexOf(q.replace(/\D/g, '')) === 0 && q.replace(/\D/g, '').length >= 2)
-      out.push({ text: s, kind: 'Mã HS' });
+  if (q.length < 2) return out;
+  var digits = q.replace(/\D/g, '');
+  /* Số hiệu: khớp đầu số hiệu trước, rồi mới tới khớp ở giữa — khớp là
+     mở thẳng văn bản. */
+  pool.so.forEach(function (s) {
+    if (norm(s).indexOf(q) === 0)
+      push(s, 'Văn bản', 'Văn bản', 'open', { ma: pool.soMa[s] });
+  });
+  pool.so.forEach(function (s) {
+    if (norm(s).indexOf(q) > 0)
+      push(s, 'Văn bản', 'Văn bản', 'open', { ma: pool.soMa[s] });
+  });
+  /* Mã HS theo tiền tố + chương HS khi gõ đúng 2 chữ số của chương. */
+  if (digits.length >= 2) {
+    pool.hs.forEach(function (s) {
+      if (out.length < 8 && hsDigits(s).indexOf(digits) === 0)
+        push(s, 'Mã HS · ' + (pool.hsCount[s] || 0) + ' văn bản', 'Mã HS');
+    });
+    if (digits.length === 2 && pool.chapters[digits]) {
+      push('Chương ' + digits, 'Chương HS · ' + pool.chapters[digits] + ' văn bản',
+        'Chương HS', 'chapter', { chapter: digits });
+    }
+  }
+  /* Cụm từ mặt hàng (tiền tố) rồi từ đơn. */
+  pool.phrases.forEach(function (p) {
+    if (out.length < 8 && p.indexOf(q) === 0)
+      push(p, 'Mặt hàng · ' + (pool.phraseCount[p] || 0) + ' văn bản', 'Mặt hàng');
   });
   pool.words.forEach(function (w) {
-    if (out.length < 8 && w.indexOf(q) === 0) out.push({ text: w, kind: 'Tên hàng' });
+    if (out.length < 8 && w.indexOf(q) === 0) push(w, 'Tên hàng', 'Mặt hàng');
   });
+  /* Hết gợi ý tiền tố mà gõ sai 1–2 ký tự: gợi ý mờ (fuzzy) tối đa 2 mục. */
+  if (!out.length && q.length >= 4) {
+    var v = vocab(), cands = [], md = q.length >= 7 ? 2 : 1;
+    Object.keys(v).forEach(function (w) {
+      if (Math.abs(w.length - q.length) <= md && lev(q, w, md) <= md) cands.push(w);
+    });
+    cands.sort(function (a, b) { return v[b] - v[a]; }).slice(0, 2).forEach(function (w) {
+      push(w, 'Gần giống', 'Mặt hàng');
+    });
+  }
   return out;
 }
 
@@ -352,12 +590,16 @@ if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
     norm: norm, lev: lev, hsDigits: hsDigits, parseDate: parseDate,
     buildIndex: buildIndex, searchDocs: searchDocs, suggest: suggest,
+    didYouMean: didYouMean, relaxedSearch: relaxedSearch,
+    relatedSearches: relatedSearches, chapterCount: chapterCount,
+    recordRecent: recordRecent, recents: recents,
     parseDocDetail: parseDocDetail, relatedDocs: relatedDocs,
     extractDriveId: extractDriveId, highlight: highlight,
     _pdfBlockHtml: pdfBlockHtml, _renderDetail: renderDetail,
     _setData: function (docs, drive, meta, img) {
       DOCS = docs; DRIVE = drive || {}; META = meta || {}; IMG = img || {};
-      _suggestPool = null; buildIndex(docs);
+      _suggestPool = null; _vocab = null; _recents = null; _clicks = null;
+      buildIndex(docs);
     }
   };
 }
@@ -412,6 +654,56 @@ function cardHtml(r) {
     '</article>';
 }
 
+/* Trang 0 kết quả: thừa nhận truy vấn, sửa lỗi gõ, nới truy vấn, dẫn tới
+   chương liên quan, cho văn bản mới nhất và nút hỏi Trang — không để độc
+   giả rơi vào ngõ cụt (chuẩn Baymard: 68% site làm tệ phần này). */
+function zeroResultHtml() {
+  var q = state.query.trim();
+  var escQ = esc(q);
+  var html = '<div class="zero-recovery"><h2>Không tìm thấy văn bản nào cho “' + escQ + '”</h2>';
+  var corr = didYouMean(q);
+  if (corr) {
+    html += '<p class="did-you-mean">Ý bạn là: <button type="button" class="dym-btn" data-q="' +
+      esc(corr) + '">' + esc(corr) + '</button>?</p>';
+  }
+  var relaxed = relaxedSearch(q);
+  if (relaxed && relaxed.results.length) {
+    html += '<p class="relaxed-note">Kết quả gần đúng — đã bỏ từ “' + esc(relaxed.dropped) + '”:</p>' +
+      relaxed.results.slice(0, 5).map(cardHtml).join('');
+  }
+  var digits = norm(q).replace(/\D/g, '');
+  if (digits.length >= 2) {
+    var ch = digits.slice(0, 2);
+    var count = chapterCount(ch);
+    if (count) {
+      html += '<p><a class="btn ghost" href="#/chuong/' + ch + '">Duyệt Chương ' + ch +
+        ' (' + count + ' văn bản)</a></p>';
+    }
+  }
+  var newest = DOCS.slice().sort(function (a, b) { return parseDate(b.ngay) - parseDate(a.ngay); }).slice(0, 5);
+  html += '<h3>Văn bản mới nhất trong kho</h3>' +
+    newest.map(function (d) {
+      return '<article class="card"><h3><a href="#/bai/' + d.ma + '">' + esc(d.so_hieu) +
+        '</a></h3><p class="sub">' + esc(d.ngay || '') + ' · ' + hsBadge(d) + '</p><p>' +
+        esc(shortText(d.mat_hang || d.trich_yeu, 140)) + '</p></article>';
+    }).join('');
+  html += '<p><a class="btn" href="https://m.me/tiepvanhoangkim1" target="_blank" rel="noopener">' +
+    'Hỏi Trang về mặt hàng này</a></p>' +
+    '<p class="pdf-note">Nhắn cho Trang Văn bản XNK kèm từ khóa “' + escQ +
+    '” — Trang sẽ tra cứu và trả lời.</p></div>';
+  return html;
+}
+
+function wireResultButtons() {
+  document.querySelectorAll('#view .dym-btn, #view .rel-chip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var q = $('#q');
+      q.value = b.getAttribute('data-q');
+      commitSearch(q.value);
+    });
+  });
+}
+
 function renderList() {
   var results = searchDocs(state.query, {
     loai: state.loai, chapter: state.chapter, year: state.year
@@ -426,17 +718,31 @@ function renderList() {
     info.textContent = 'Hiển thị văn bản mới nhất. Gõ từ khóa để tìm trong cả kho.';
   }
   if (!results.length) {
-    view.innerHTML = '<p class="empty">Không tìm thấy văn bản nào khớp. ' +
-      'Thử gõ không dấu, chỉ một phần số hiệu hoặc mã HS (ví dụ: “vai sofa”, “3504”, “1397”).</p>';
+    view.innerHTML = zeroResultHtml();
+    wireResultButtons();
     return;
   }
+  var html = '';
+  var corr = state.query ? didYouMean(state.query) : null;
+  if (corr && results.length <= 3) {
+    html += '<p class="did-you-mean">Có phải bạn muốn tìm: <button type="button" class="dym-btn" data-q="' +
+      esc(corr) + '">' + esc(corr) + '</button>?</p>';
+  }
   var shown = results.slice(0, state.shown);
-  var html = shown.map(cardHtml).join('');
+  html += shown.map(cardHtml).join('');
+  var rel = relatedSearches(results, currentTokens());
+  if (rel.length) {
+    html += '<div class="related-search"><span>Tìm kiếm liên quan:</span>' +
+      rel.map(function (r) {
+        return '<button type="button" class="chip rel-chip" data-q="' + esc(r) + '">' + esc(r) + '</button>';
+      }).join('') + '</div>';
+  }
   if (results.length > state.shown) {
     html += '<button type="button" class="load-more" id="moreBtn">Xem thêm (' +
       (results.length - state.shown) + ' văn bản nữa)</button>';
   }
   view.innerHTML = html;
+  wireResultButtons();
   var more = $('#moreBtn');
   if (more) more.addEventListener('click', function () {
     state.shown += PAGE_SIZE; renderList();
@@ -677,24 +983,87 @@ function fillFilterOptions() {
   });
 }
 
+/* Dropdown gợi ý nhóm theo loại + điều hướng bàn phím (chuẩn ARIA combobox:
+   ↑/↓ di chuyển, Enter chọn, Esc đóng và khôi phục truy vấn gốc, Tab đóng
+   mà không chọn). Khi di chuyển bằng phím, ô nhập hiện tạm gợi ý đang chọn. */
+var _suggItems = [], _suggActive = -1, _qBeforeNav = '';
+function hideSuggestions() {
+  var box = $('#suggest');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  _suggItems = []; _suggActive = -1;
+  var q = $('#q');
+  if (q) {
+    q.setAttribute('aria-expanded', 'false');
+    q.removeAttribute('aria-activedescendant');
+  }
+}
 function showSuggestions() {
   var box = $('#suggest'), q = $('#q');
+  if (!box || !q) return;
   var items = suggest(q.value);
-  if (!items.length) { box.hidden = true; box.innerHTML = ''; return; }
-  box.innerHTML = items.map(function (it, i) {
-    return '<button type="button" data-i="' + i + '" data-text="' + esc(it.text) + '">' +
+  _suggItems = items; _suggActive = -1; _qBeforeNav = q.value;
+  var status = $('#suggestStatus');
+  if (!items.length) { hideSuggestions(); if (status) status.textContent = ''; return; }
+  var html = '', lastGroup = '';
+  items.forEach(function (it, i) {
+    if (it.group !== lastGroup) {
+      html += '<div class="sugg-group" role="presentation">' + esc(it.group) + '</div>';
+      lastGroup = it.group;
+    }
+    html += '<button type="button" role="option" id="sugg-' + i + '" data-i="' + i + '">' +
       esc(it.text) + '<span class="kind">' + esc(it.kind) + '</span></button>';
-  }).join('');
-  box.hidden = false;
-  box.querySelectorAll('button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      q.value = b.getAttribute('data-text');
-      box.hidden = true;
-      state.query = q.value; state.shown = PAGE_SIZE;
-      if (location.hash && location.hash !== '#/') location.hash = '#/';
-      renderList();
-    });
   });
+  box.innerHTML = html;
+  box.hidden = false;
+  q.setAttribute('aria-expanded', 'true');
+  if (status) status.textContent = items.length + ' gợi ý';
+  box.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () { activateSuggestion(+b.getAttribute('data-i')); });
+  });
+}
+function markActive(i) {
+  _suggActive = i;
+  var box = $('#suggest'), q = $('#q');
+  box.querySelectorAll('button').forEach(function (b, j) {
+    b.classList.toggle('active', j === i);
+  });
+  if (i >= 0 && _suggItems[i]) {
+    q.setAttribute('aria-activedescendant', 'sugg-' + i);
+    q.value = _suggItems[i].text;
+  } else {
+    q.removeAttribute('aria-activedescendant');
+    q.value = _qBeforeNav;
+  }
+}
+function activateSuggestion(i) {
+  var it = _suggItems[i];
+  if (!it) return;
+  var q = $('#q');
+  hideSuggestions();
+  if (it.action === 'open' && it.ma) { location.hash = '#/bai/' + it.ma; return; }
+  if (it.action === 'chapter' && it.chapter) { location.hash = '#/chuong/' + it.chapter; return; }
+  q.value = it.text;
+  commitSearch(it.text);
+}
+/* Chốt một truy vấn: ghi lại lịch sử tìm, đồng bộ URL (?q=), hiển thị. */
+function commitSearch(text) {
+  state.query = text; state.shown = PAGE_SIZE;
+  recordRecent(text);
+  syncQueryToUrl();
+  if (location.hash.indexOf('#/bai/') === 0) location.hash = '#/';
+  else renderList();
+}
+/* Đưa truy vấn vào URL (?q=) để link tìm kiếm chia sẻ được, nút Back hoạt
+   động, và Cloudflare Web Analytics (đã bật, không cookie) ghi lại top
+   truy vấn thật của độc giả — nguồn duy nhất để cải tiến từ đồng nghĩa
+   và gợi ý theo hành vi thật mà không cần backend. */
+function syncQueryToUrl() {
+  try {
+    var url = new URL(location.href);
+    if (state.query && state.query.trim()) url.searchParams.set('q', state.query.trim());
+    else url.searchParams.delete('q');
+    history.replaceState(null, '', url.pathname + url.search + location.hash);
+  } catch (e) { /* trình duyệt quá cũ: bỏ qua */ }
 }
 
 function boot() {
@@ -713,33 +1082,69 @@ function boot() {
     fillFilterOptions();
 
     var q = $('#q');
+    /* Truy vấn mở sẵn từ link chia sẻ (?q=...). */
+    try {
+      var initialQ = new URLSearchParams(location.search).get('q');
+      if (initialQ) { q.value = initialQ; state.query = initialQ; }
+    } catch (e) { /* bỏ qua */ }
     var deb = null;
     q.addEventListener('input', function () {
       clearTimeout(deb);
       deb = setTimeout(function () {
         state.query = q.value; state.shown = PAGE_SIZE;
-        if (location.hash && location.hash !== '#/' && location.hash.indexOf('#/bai/') !== 0) {
-          /* đang ở trang chương: quay về danh sách để tìm */
-        }
+        syncQueryToUrl();
         showSuggestions();
         if (location.hash.indexOf('#/bai/') === 0) location.hash = '#/';
         else renderList();
       }, 150);
     });
+    q.addEventListener('focus', function () {
+      if (!q.value.trim()) showSuggestions(); /* ô trống: "Tìm nhiều" + gần đây */
+    });
     q.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { $('#suggest').hidden = true; }
-      if (e.key === 'Enter') { $('#suggest').hidden = true; renderList(); }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if ($('#suggest').hidden) { showSuggestions(); }
+        if (!_suggItems.length) return;
+        var next = e.key === 'ArrowDown'
+          ? (_suggActive + 1) % _suggItems.length
+          : (_suggActive - 1 + _suggItems.length) % _suggItems.length;
+        markActive(next);
+      } else if (e.key === 'Enter') {
+        hideSuggestions();
+        commitSearch(q.value);
+      } else if (e.key === 'Escape') {
+        hideSuggestions();
+        q.value = _qBeforeNav;
+        state.query = _qBeforeNav; state.shown = PAGE_SIZE;
+        syncQueryToUrl();
+        renderList();
+      }
     });
     document.addEventListener('click', function (e) {
       var box = $('#suggest');
-      if (box && !box.hidden && !e.target.closest('.search-box')) box.hidden = true;
+      if (box && !box.hidden && !e.target.closest('.search-box')) hideSuggestions();
+    });
+    /* Ghi lại lượt mở văn bản (tín hiệu hạng nhẹ trên máy này) + lịch sử tìm. */
+    document.getElementById('view').addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="#/bai/"]');
+      if (!a) return;
+      var m = /^#\/bai\/(\d+)/.exec(a.getAttribute('href') || '');
+      if (m) recordClick(m[1]);
+      if (state.query) recordRecent(state.query);
+    });
+    /* Nút Back/Forward của trình duyệt: khôi phục truy vấn từ URL. */
+    window.addEventListener('popstate', function () {
+      try {
+        var pq = new URLSearchParams(location.search).get('q') || '';
+        q.value = pq; state.query = pq; state.shown = PAGE_SIZE;
+      } catch (e) { /* bỏ qua */ }
+      route();
     });
     document.querySelectorAll('.chip').forEach(function (c) {
       c.addEventListener('click', function () {
         q.value = c.getAttribute('data-q');
-        state.query = q.value; state.shown = PAGE_SIZE;
-        if (location.hash.indexOf('#/bai/') === 0) location.hash = '#/';
-        else renderList();
+        commitSearch(q.value);
       });
     });
     $('#fLoai').addEventListener('change', function (e) {
@@ -755,6 +1160,7 @@ function boot() {
       state.loai = ''; state.chapter = ''; state.year = ''; state.query = '';
       q.value = ''; state.shown = PAGE_SIZE;
       syncFilterControls();
+      syncQueryToUrl();
       if (location.hash && location.hash !== '#/') location.hash = '#/';
       else renderList();
     });
