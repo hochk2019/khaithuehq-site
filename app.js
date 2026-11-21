@@ -493,6 +493,202 @@ function suggest(query) {
   return out;
 }
 
+/* Gợi ý khi gõ trong ô hỏi: hoàn thiện cụm đang gõ (tên hàng, chất liệu,
+   công dụng) từ chính tên hàng trong kho, giữ nguyên phần đầu câu đã gõ.
+   Gõ không dấu vẫn ra cụm có dấu; gõ sai nhẹ thì gợi ý từ gần giống. */
+var ASK_START_STOP = ('của và với các những là thì có được này đó khi nếu hoặc hay như một mới ' +
+  'đã chưa mã model nhãn hiệu').split(' ');
+var ASK_END_EXTRA = ('dùng để bằng từ làm pha chứa gồm sử dành dạng mã model nhãn hiệu ' +
+  'công dụng tên thương mại').split(' ');
+var ASK_USE_START = ['dùng', 'sử', 'dành', 'để'];
+var ASK_KIND = { goods: 'Tên hàng', material: 'Chất liệu', use: 'Công dụng' };
+var _askPool = null;
+function askPool() {
+  if (_askPool) return _askPool;
+  var map = {}, byFirst = {}, pairs = {}, next = {};
+  var mats = {};
+  NL_MATERIAL.concat(NL_MATERIAL_PHRASES).forEach(function (m) { mats[viKey(m).split(' ')[0]] = 1; });
+  function endOk(w) { return NL_STOP.indexOf(w) === -1 && ASK_END_EXTRA.indexOf(w) === -1; }
+  DOCS.forEach(function (d) {
+    var src = d.mat_hang || d.trich_yeu || '';
+    String(src).split(/[,;:()\[\]\/.\n"“”]+/).forEach(function (clause) {
+      var ws = viKey(clause).split(' ').filter(Boolean);
+      for (var i = 0; i < ws.length; i++) {
+        if (i) {
+          var pa = ws[i - 1], pb = ws[i], nx = next[pa] = next[pa] || { t: 0, w: {} };
+          pairs[norm(pa) + ' ' + norm(pb)] = 1; nx.t++; nx.w[pb] = (nx.w[pb] || 0) + 1;
+        }
+        if (/\d/.test(ws[i]) || ASK_START_STOP.indexOf(ws[i]) !== -1) continue;
+        for (var L = 1; L <= 4 && i + L <= ws.length; L++) {
+          var w = ws[i + L - 1];
+          if (/\d/.test(w) || w.length > 20) break;
+          if (!endOk(w) || (L === 1 && w.length < 2)) continue;
+          var text = ws.slice(i, i + L).join(' '), key = norm(text), e = map[key];
+          if (!e) {
+            var f = key.split(' ')[0];
+            e = map[key] = { key: key, len: L, forms: {}, docs: {}, n: 0,
+              kind: ASK_USE_START.indexOf(ws[i]) !== -1 && L > 1 ? 'use' : mats[ws[i]] ? 'material' : 'goods' };
+            (byFirst[f] = byFirst[f] || []).push(e);
+          }
+          e.forms[text] = (e.forms[text] || 0) + 1;
+          if (!e.docs[d.ma]) { e.docs[d.ma] = 1; e.n++; }
+        }
+      }
+    });
+  });
+  Object.keys(map).forEach(function (k) {
+    var e = map[k], best = '', bn = 0;
+    Object.keys(e.forms).forEach(function (t) { if (e.forms[t] > bn) { bn = e.forms[t]; best = t; } });
+    e.text = best; delete e.forms; delete e.docs;
+    /* Cụm dừng giữa chừng ("phân bón hữu", "cảm biến vị") không đáng gợi ý: từ cuối
+       gần như luôn đi kèm một từ sau. */
+    var nx = next[best.split(' ').pop()], top = 0, topW = '';
+    if (nx) Object.keys(nx.w).forEach(function (w) { if (nx.w[w] > top) { top = nx.w[w]; topW = w; } });
+    e.dangling = e.len < 4 && !!nx && nx.t >= 3 && top / nx.t >= 0.75 && endOk(topW);
+  });
+  /* Số văn bản dùng một cách gọi bất kỳ trong mỗi nhóm đồng nghĩa (cụm dài hơn 4 từ cũng tính). */
+  var texts = DOCS.map(function (d) { return ' ' + norm((d.mat_hang || '') + ' ' + (d.trich_yeu || '')) + ' '; });
+  var synN = NL_SYN_GROUPS.map(function (g) {
+    var keys = g.map(function (t) { return ' ' + norm(t) + ' '; });
+    return texts.filter(function (x) { return keys.some(function (k) { return x.indexOf(k) !== -1; }); }).length;
+  });
+  _askPool = { map: map, byFirst: byFirst, firsts: Object.keys(byFirst), pairs: pairs, synN: synN };
+  return _askPool;
+}
+
+/* Mỗi gợi ý: {text, html, kind, action: 'ask' | 'open', ma?}. */
+function askSuggest(text) {
+  var raw = String(text == null ? '' : text);
+  var words = raw.trim().split(/\s+/).filter(Boolean);
+  if (!words.length || norm(raw).length < 2) return [];
+  var endsSpace = /\s$/.test(raw), pool = askPool(), sp = suggestPool();
+  var out = [], seen = {};
+  function push(it) {
+    var k = norm(it.text);
+    if (out.length >= 8 || seen[k]) return;
+    seen[k] = 1; out.push(it);
+  }
+  var lastRaw = words[words.length - 1];
+  var headAll = words.slice(0, -1).join(' ');
+  /* Số hiệu văn bản (mở thẳng bài) và mã HS theo tiền tố. */
+  if (/\d/.test(lastRaw) && !endsSpace) {
+    var lr = norm(lastRaw), dg = lastRaw.replace(/\D/g, '');
+    if (words.length === 1) {
+      var nSo = 0;
+      sp.so.forEach(function (s) {
+        if (nSo < 3 && norm(s).indexOf(lr) === 0) {
+          nSo++;
+          push({ text: s, html: '<b>' + esc(s) + '</b>', kind: 'Văn bản · mở bài', action: 'open', ma: sp.soMa[s] });
+        }
+      });
+    }
+    if (dg.length >= 2 && /^[\d.]+$/.test(lastRaw)) {
+      sp.hs.filter(function (h) { return hsDigits(h).indexOf(dg) === 0; })
+        .sort(function (a, b) { return (sp.hsCount[b] || 0) - (sp.hsCount[a] || 0) || (a < b ? -1 : 1); })
+        .slice(0, 5).forEach(function (h) {
+          push({ text: (headAll ? headAll + ' ' : '') + h,
+            html: (headAll ? esc(headAll) + ' ' : '') + '<b>' + esc(h) + '</b>',
+            kind: 'Mã HS · ' + (sp.hsCount[h] || 0) + ' văn bản', action: 'ask' });
+        });
+    }
+    return out;
+  }
+  function phraseMatches(ws, fuzzy) {
+    var levels = [];
+    for (var k = Math.min(4, ws.length); k >= 1; k--) {
+      var tailWs = ws.slice(ws.length - k), tail = norm(tailWs.join(' '));
+      if (!tail || (k === 1 && tail.length < 2 && !endsSpace)) continue;
+      var typedWs = tailWs.map(viKey), typed = typedWs.join(' '), first = tail.split(' ')[0], lists;
+      if (k === 1 && !endsSpace) {
+        lists = pool.firsts.filter(function (f) { return f.indexOf(tail) === 0; })
+          .map(function (f) { return pool.byFirst[f]; });
+      } else lists = [pool.byFirst[first] || []];
+      var head = ws.slice(0, ws.length - k).join(' ');
+      var prev = head ? norm(ws[ws.length - k - 1]) : '';
+      var cands = [];
+      lists.forEach(function (list) {
+        list.forEach(function (e) {
+          if (endsSpace ? e.key.indexOf(tail + ' ') !== 0 : e.key.indexOf(tail) !== 0) return;
+          if (e.len > k + 3) return;
+          /* Cụm đã gõ đủ: chỉ gợi ý khi thêm được dấu ("vai det kim" → "vải dệt kim"). */
+          if (!fuzzy && e.key === tail && e.text === typed) return;
+          if (e.dangling) return;
+          /* Từ đã gõ có dấu thì phải đúng dấu ("dùng" không gợi "dụng", "áp" không gợi "apple"). */
+          var pw = e.text.split(' ');
+          for (var j = 0; j < typedWs.length; j++) {
+            var tw = typedWs[j], full = j < typedWs.length - 1 || endsSpace;
+            if (tw === norm(tw)) continue;
+            if (full ? pw[j] !== tw : pw[j].indexOf(tw) !== 0) return;
+          }
+          /* Nối vào phần đầu câu phải thành cụm có thật trong kho ("ống bằng thép", không "ống bằng thực phẩm"). */
+          if (prev && !pool.pairs[prev + ' ' + e.key.split(' ')[0]] &&
+              !(k === 1 && e.len === 1 && (fuzzy || tail.length >= 3))) return;
+          var keep = Math.min(k, pw.length), lastW = pw[keep - 1], tw0 = typedWs[keep - 1] || '';
+          var typedPart = esc(pw.slice(0, keep).join(' '));
+          if (!endsSpace && keep === typedWs.length && lastW.length > tw0.length &&
+              norm(lastW).indexOf(norm(tw0)) === 0) {
+            typedPart = esc(pw.slice(0, keep - 1).concat([lastW.slice(0, tw0.length)]).join(' ')) +
+              '<b>' + esc(lastW.slice(tw0.length)) + '</b>';
+          }
+          cands.push({ score: Math.log(1 + e.n) * 12 - Math.abs(e.len - k - 1) * 6 + (e.kind === 'goods' ? 2 : 0),
+            text: (head ? head + ' ' : '') + e.text,
+            html: (head ? esc(head) + ' ' : '') + typedPart +
+              (pw.length > keep ? ' <b>' + esc(pw.slice(keep).join(' ')) + '</b>' : ''),
+            kind: ASK_KIND[e.kind] + ' · ' + e.n + ' văn bản' + (fuzzy ? ' · gần giống' : ''),
+            action: 'ask' });
+        });
+      });
+      /* Cách gọi khác trong nhóm đồng nghĩa ("thuc pham chuc" → "thực phẩm chức năng",
+         "thực phẩm bảo vệ sức khỏe"), chỉ khi trong kho có văn bản dùng một trong các cách gọi. */
+      if (!fuzzy && tail.length >= (k === 1 ? 4 : 3)) NL_SYN_GROUPS.forEach(function (g, gi) {
+        var n = pool.synN[gi];
+        if (!n) return;
+        g.forEach(function (t) {
+          var nt = norm(t);
+          if (nt.indexOf(tail) !== 0 || nt === tail) return;
+          if (!hasDia(t) && g.some(function (x) { return x !== t && norm(x) === nt; })) return;
+          /* Cách gọi đang gõ không có trong kho: gợi ý thêm cách gọi mà văn bản dùng. */
+          var alts = pool.map[nt] ? [t] : g.filter(function (x) { return x !== t && pool.map[norm(x)]; });
+          if (!alts.length) alts = [t];
+          alts.forEach(function (x) {
+            var e = pool.map[norm(x)];
+            cands.push({ score: Math.log(1 + n) * 12 - 3, text: (head ? head + ' ' : '') + x,
+              html: (head ? esc(head) + ' ' : '') + '<b>' + esc(x) + '</b>',
+              kind: e ? ASK_KIND[e.kind] + ' · ' + e.n + ' văn bản' : 'Cách gọi khác · ' + n + ' văn bản',
+              action: 'ask' });
+          });
+        });
+      });
+      cands.sort(function (a, b) { return b.score - a.score; });
+      if (cands.length) levels.push({ k: k, c: cands });
+    }
+    /* Ưu tiên khớp dài nhất với phần đang gõ; chỉ lấy thêm mức kế tiếp khi còn ít gợi ý. */
+    var res = levels[0] ? levels[0].c : [];
+    if (res.length < 4 && levels[1] && levels[1].k === levels[0].k - 1) res = res.concat(levels[1].c);
+    return res.map(function (c) { c.html = c.html.replace(/<\/b> <b>/g, ' '); return c; });
+  }
+  phraseMatches(words, false).forEach(push);
+  /* Không có cụm nào khớp tiền tố: sửa từ cuối theo từ gần giống trong kho. */
+  var nl = norm(lastRaw);
+  if (!out.length && nl.length >= 3 && !/\d/.test(nl)) {
+    var md = nl.length >= 7 ? 2 : 1, fixes = [];
+    /* Từ cuối đã gõ có dấu thì so cả dấu ("suất" không thành "sữa"). */
+    var vl = viKey(lastRaw), useDia = vl !== nl;
+    pool.firsts.forEach(function (f) {
+      var single = pool.map[f];
+      if (!single) return;
+      var a = useDia ? vl : nl, b = useDia ? single.text : f;
+      var d = lev(a, b, md);
+      if (d > md && !endsSpace && a.length >= 4 && b.length > a.length) d = lev(a, b.slice(0, a.length), 1);
+      if (d <= md && f !== nl) fixes.push(single);
+    });
+    fixes.sort(function (a, b) { return b.n - a.n; }).slice(0, 3).forEach(function (e) {
+      phraseMatches(words.slice(0, -1).concat([e.text]), true).slice(0, 3).forEach(push);
+    });
+  }
+  return out;
+}
+
 /* ================= Tách nội dung bài ================= */
 
 function parseDocDetail(doc) {
@@ -972,6 +1168,10 @@ var CP_STOP = ('mã hàng mới hiệu không nhãn model mét cuộn kt khổ �
   'thành phần gồm chứa tỷ lệ hàng hóa sản phẩm tên thông báo kết quả phân tích phân loại ' +
   'xác định trước số mẫu khai báo nêu tại tờ khai đã chưa lot hsd cb ctcvn batch date').split(' ');
 var CP_STOP_SET = {};
+/* Từ nhiễu chỉ bỏ ở hàng "Từ chỉ có trong tên hàng" (số lô, số hiệu, mã đơn...). */
+var CP_UNIQ_STOP = {};
+('no số lô lo lot batch ref code mã sn serial seri po invoice part pn item art').split(' ')
+  .forEach(function (w) { CP_UNIQ_STOP[w] = 1; });
 CP_STOP.forEach(function (w) { CP_STOP_SET[w] = 1; });
 /* Cặp mẫu biên soạn tay, luôn đứng đầu danh sách. */
 var CP_SEED = [{
@@ -1177,7 +1377,7 @@ function cpDiff(a, b) {
   cpWords(a.mat_hang || a.trich_yeu).forEach(function (w) { wa[w] = 1; });
   cpWords(b.mat_hang || b.trich_yeu).forEach(function (w) { wb[w] = 1; });
   function uniq(x, y) {
-    return Object.keys(x).filter(function (w) { return !y[w] && cp.df[w]; })
+    return Object.keys(x).filter(function (w) { return !y[w] && cp.df[w] && !CP_UNIQ_STOP[w]; })
       .sort(function (p, q) { return cp.df[p] - cp.df[q]; }).slice(0, 5);
   }
   var na = uniq(wa, wb), nb = uniq(wb, wa);
@@ -1195,7 +1395,7 @@ function cpDiff(a, b) {
 if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
     norm: norm, lev: lev, hsDigits: hsDigits, parseDate: parseDate,
-    buildIndex: buildIndex, searchDocs: searchDocs, suggest: suggest,
+    buildIndex: buildIndex, searchDocs: searchDocs, suggest: suggest, askSuggest: askSuggest,
     didYouMean: didYouMean, relaxedSearch: relaxedSearch,
     relatedSearches: relatedSearches, chapterCount: chapterCount,
     recordRecent: recordRecent, recents: recents,
@@ -1207,7 +1407,7 @@ if (typeof globalThis !== 'undefined') {
     _pdfBlockHtml: pdfBlockHtml, _renderDetail: renderDetail,
     _setData: function (docs, drive, meta, img) {
       DOCS = docs; DRIVE = drive || {}; META = meta || {}; IMG = img || {};
-      _suggestPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {}; _cp = null;
+      _suggestPool = null; _askPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {}; _cp = null;
       buildIndex(docs);
     }
   };
@@ -1671,7 +1871,7 @@ function cpRelatedHtml(doc) {
   return '<section class="related"><h2>Dễ nhầm với</h2>' + list.map(function (x) {
     var o = x.other;
     return '<article class="card"><h3><a href="' + cpUrl(x.pair) + '">So sánh với ' + esc(o.so_hieu) +
-      '</a></h3><p class="sub">' + esc(o.ngay || '') + ' · ' + hsBadge(o) + ' · Giống ' + cpPct(x.pair.sim) +
+      '</a></h3><p class="sub">' + esc(o.ngay || '') + ' · ' + hsBadge(o) + ' · ' + (x.pair.seed ? 'Cặp mẫu' : 'Giống ' + cpPct(x.pair.sim)) +
       '</p><p>' + esc(shortText(o.mat_hang || o.trich_yeu, 140)) + '</p></article>';
   }).join('') + '</section>';
 }
@@ -1888,17 +2088,102 @@ function renderAsk(question, opts) {
     location.hash = '#/';
   }
 }
+/* Dropdown gợi ý của ô hỏi (ARIA combobox như ô từ khóa): ↑/↓ chọn và hiện tạm
+   gợi ý trong ô, Enter hoặc bấm để hỏi ngay, Esc đóng và trả lại phần đã gõ. */
+var _askItems = [], _askActive = -1, _askTyped = '';
+function hideAskSuggest() {
+  var box = $('#askSuggest'), input = $('#ask');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  _askItems = []; _askActive = -1;
+  if (input) { input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
+}
+function showAskSuggest() {
+  var box = $('#askSuggest'), input = $('#ask'), status = $('#askSuggestStatus');
+  if (!box || !input) return;
+  var atEnd = input.selectionStart == null || input.selectionStart >= input.value.length;
+  var items = atEnd ? askSuggest(input.value) : [];
+  _askItems = items; _askActive = -1; _askTyped = input.value;
+  if (!items.length) { hideAskSuggest(); if (status) status.textContent = ''; return; }
+  box.innerHTML = items.map(function (it, i) {
+    return '<button type="button" role="option" id="ask-sugg-' + i + '" data-i="' + i + '" tabindex="-1">' +
+      '<span class="sugg-text">' + it.html + '</span><span class="kind">' + esc(it.kind) + '</span></button>';
+  }).join('');
+  box.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  if (status) status.textContent = items.length + ' gợi ý';
+}
+function markAskActive(i) {
+  var box = $('#askSuggest'), input = $('#ask');
+  _askActive = i;
+  box.querySelectorAll('button').forEach(function (b, j) { b.classList.toggle('active', j === i); });
+  if (i >= 0 && _askItems[i]) {
+    input.setAttribute('aria-activedescendant', 'ask-sugg-' + i);
+    input.value = _askItems[i].text;
+    var b = $('#ask-sugg-' + i);
+    if (b && b.scrollIntoView) b.scrollIntoView({ block: 'nearest' });
+  } else {
+    input.removeAttribute('aria-activedescendant');
+    input.value = _askTyped;
+  }
+}
+function activateAskSuggest(i) {
+  var it = _askItems[i], input = $('#ask');
+  if (!it) return;
+  hideAskSuggest();
+  input.value = it.text;
+  if (it.action === 'open' && it.ma) { location.hash = '#/bai/' + it.ma; return; }
+  renderAsk(it.text);
+  syncAskToUrl(it.text);
+}
 function wireAsk() {
-  var form = $('#askForm'), input = $('#ask');
+  var form = $('#askForm'), input = $('#ask'), box = $('#askSuggest');
   if (!form || !input) return;
+  if (box) {
+    var deb = null;
+    input.addEventListener('input', function () {
+      clearTimeout(deb);
+      deb = setTimeout(showAskSuggest, 80);
+    });
+    /* Dựng sẵn bộ gợi ý khi người dùng chạm vào ô, không làm chậm lần tải trang. */
+    input.addEventListener('focus', function () { setTimeout(askPool, 0); }, { once: true });
+    input.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (box.hidden) showAskSuggest();
+        if (!_askItems.length) return;
+        e.preventDefault();
+        markAskActive(e.key === 'ArrowDown'
+          ? (_askActive + 1 >= _askItems.length ? -1 : _askActive + 1)
+          : (_askActive <= -1 ? _askItems.length - 1 : _askActive - 1));
+      } else if (e.key === 'Enter') {
+        if (!box.hidden && _askActive >= 0) { e.preventDefault(); activateAskSuggest(_askActive); }
+        else hideAskSuggest(); /* Enter không chọn gợi ý: hỏi đúng câu đã gõ. */
+      } else if (e.key === 'Escape') {
+        if (!box.hidden) { e.preventDefault(); input.value = _askTyped; hideAskSuggest(); }
+      } else if (e.key === 'Tab') {
+        hideAskSuggest();
+      }
+    });
+    /* mousedown giữ con trỏ trong ô; click mới chọn (chạm trên điện thoại cũng vậy). */
+    box.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    box.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-i]');
+      if (b) activateAskSuggest(+b.getAttribute('data-i'));
+    });
+    document.addEventListener('click', function (e) {
+      if (!box.hidden && !e.target.closest('.ask-row')) hideAskSuggest();
+    });
+  }
   form.addEventListener('submit', function (e) {
     e.preventDefault();
+    hideAskSuggest();
     renderAsk(input.value);
     syncAskToUrl(input.value);
   });
   document.querySelectorAll('.ask-chip').forEach(function (b) {
     b.addEventListener('click', function () {
       input.value = b.getAttribute('data-ask');
+      hideAskSuggest();
       renderAsk(input.value);
       syncAskToUrl(input.value);
     });
