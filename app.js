@@ -876,15 +876,15 @@ function askDocs(question, opts) {
       if (other.length) conflict = other[0] + ' (câu hỏi: ' + asked.join(', ') + ')';
     });
     if (conflict) score *= 0.5;
-    var hsD = hsDigits(d.ma_hs);
+    var hsD = hsDigits(d.ma_hs), hsHit = false;
     parsed.hs.forEach(function (h) {
-      if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
+      if (hsD.indexOf(h) === 0) { hsHit = true; score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
     });
     if (!score) continue;
     var coverage = totalW ? Math.min(1, got / totalW) : (head ? 1 : 0.5);
     if (x.cancel) score *= 0.5;
     out.push({ doc: d, i: i, score: score * (0.5 + coverage), coverage: coverage,
-      matched: matched, missing: missing, head: head, cancel: x.cancel, conflict: conflict });
+      matched: matched, missing: missing, head: head, hsHit: hsHit, cancel: x.cancel, conflict: conflict });
   }
   out.sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score;
@@ -903,12 +903,12 @@ function askDocs(question, opts) {
   if (base.weak) return base;
   /* Tối đa 3 văn bản cùng một mã HS để còn chỗ cho mã thay thế. */
   var good = out.filter(function (r) { return r.coverage >= 0.4; });
-  /* Các hạng sau hạng 1 phải khớp từ chỉ mặt hàng chính (từ đầu câu hỏi) ở tên hàng
-     hoặc kết quả phân loại; tránh kết quả lấp chỗ chỉ trùng một từ chung. */
+  /* Các hạng sau hạng 1 phải trùng mã HS được hỏi, hoặc khớp từ chỉ mặt hàng chính (từ đầu câu hỏi)
+     ở tên hàng hoặc kết quả phân loại; tránh kết quả lấp chỗ chỉ trùng một từ chung. */
   var headC = concepts.filter(function (c) { return c.cat !== 'use'; })[0] || concepts[0];
   if (headC) good = good.filter(function (r) {
-    return r === top || r.matched.some(function (m) {
-      return m.c === headC && !m.part && (m.field === 'p' || m.field === 'r');
+    return r === top || r.hsHit || r.matched.some(function (m) {
+      return m.c === headC && (m.field === 'p' || (m.field === 'r' && !m.part));
     });
   });
   var picked = [], perHs = {}, rest = [];
@@ -1079,7 +1079,7 @@ function cpData() {
   });
   Object.keys(dot).forEach(function (key) {
     var a = Math.floor(key / N), b = key % N;
-    var sim = dot[key] / (docs[a].n * docs[b].n);
+    var sim = cpSim(docs[a], docs[b]);
     if (sim < CP_MIN || seeded[docs[a].d.ma + '-' + docs[b].d.ma]) return;
     addPair(docs[a].d, docs[b].d, sim);
   });
@@ -1127,11 +1127,13 @@ function cpAttrs(text) {
         });
       }
       if (hit) {
+        if (hit.t.indexOf('đã ') === 0) neg = -99;
         if (i - neg > 8 && found[hit.g].indexOf(hit.t) === -1) found[hit.g].push(hit.t);
         i += hit.len;
         continue;
       }
       if (w[i] === 'chưa' || w[i] === 'không') neg = i;
+      else if (w[i] === 'đã') neg = -99;
       i++;
     }
   });
