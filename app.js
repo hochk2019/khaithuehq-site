@@ -668,6 +668,9 @@ NL_SYN_GROUPS.forEach(function (g) {
   });
 });
 
+/* Thuộc tính loại trừ nhau: hỏi một loại mà văn bản ghi loại khác thì hạ điểm
+   (dệt thoi 5407 khác dệt kim 6001 — cặp dễ nhầm nhất). */
+var NL_EXCLUSIVE = [['dệt kim', 'dệt thoi', 'không dệt']];
 var NL_CAT_LABEL = { goods: 'mặt hàng', material: 'chất liệu', use: 'công dụng' };
 var NL_CAT_WEIGHT = { goods: 1.25, material: 1, use: 0.8 };
 var NL_FIELD_WEIGHT = { p: 3, r: 1.4, b: 1.2, s: 0.8 };
@@ -860,6 +863,14 @@ function askDocs(question, opts) {
       matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '' });
       if (best.r.head && c.cat !== 'use' && !best.vv.part) head = true;
     });
+    var conflict = '';
+    NL_EXCLUSIVE.forEach(function (g) {
+      var asked = g.filter(function (t) { return seen[norm(t)]; });
+      if (!asked.length || asked.some(function (t) { return x.pd.indexOf(' ' + t + ' ') !== -1; })) return;
+      var other = g.filter(function (t) { return asked.indexOf(t) === -1 && x.pd.indexOf(' ' + t + ' ') !== -1; });
+      if (other.length) conflict = other[0] + ' (câu hỏi: ' + asked.join(', ') + ')';
+    });
+    if (conflict) score *= 0.5;
     var hsD = hsDigits(d.ma_hs);
     parsed.hs.forEach(function (h) {
       if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; }
@@ -868,7 +879,7 @@ function askDocs(question, opts) {
     var coverage = totalW ? Math.min(1, got / totalW) : 0.5;
     if (x.cancel) score *= 0.5;
     out.push({ doc: d, i: i, score: score * (0.5 + coverage), coverage: coverage,
-      matched: matched, missing: missing, head: head, cancel: x.cancel });
+      matched: matched, missing: missing, head: head, cancel: x.cancel, conflict: conflict });
   }
   out.sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score;
@@ -876,8 +887,9 @@ function askDocs(question, opts) {
   });
   var top = out[0];
   out.forEach(function (r) {
-    var lvl = r.coverage >= 0.75 && r.head ? 3 : r.coverage >= 0.5 ? 2 : 1;
-    if (top && lvl === 3 && r.score < top.score * 0.55) lvl = 2;
+    var lvl = r.coverage >= 0.88 && r.head ? 3 : r.coverage >= 0.6 ? 2 : 1;
+    if (top && lvl === 3 && r.score < top.score * 0.7) lvl = 2;
+    if (r.conflict) lvl = 1;
     if (r.cancel && lvl > 1) lvl--;
     r.level = lvl;
     r.confidence = lvl === 3 ? 'Cao' : lvl === 2 ? 'Trung bình' : 'Thấp';
@@ -896,15 +908,14 @@ function askDocs(question, opts) {
   while (picked.length < limit && rest.length) picked.push(rest.shift());
   picked.sort(function (a, b) { return b.score - a.score; });
   var hsMap = {}, hsList = [];
-  good.slice(0, 10).forEach(function (r) {
+  picked.forEach(function (r) {
     var h = r.doc.ma_hs;
     if (!hsMap[h]) { hsMap[h] = { hs: h, count: 0, level: 0, score: 0 }; hsList.push(hsMap[h]); }
     hsMap[h].count++;
     hsMap[h].level = Math.max(hsMap[h].level, r.level);
     hsMap[h].score += r.score;
   });
-  hsList.sort(function (a, b) { return b.score - a.score; });
-  base.results = picked; base.hsList = hsList.slice(0, 3);
+  base.results = picked; base.hsList = hsList;
   return base;
 }
 
@@ -927,6 +938,7 @@ function askReason(r) {
   var miss = r.missing.map(function (c) { return c.raw; });
   r.matched.forEach(function (m) { if (m.part) miss.push(m.c.raw); });
   if (miss.length) s += ' Chưa khớp: ' + miss.join(', ') + '.';
+  if (r.conflict) s += ' Khác loại: văn bản ghi ' + r.conflict + '.';
   if (r.cancel) s += ' Lưu ý: đây là văn bản hủy một thông báo trước đó.';
   return s;
 }
@@ -1442,13 +1454,13 @@ function renderAsk(question) {
   question = String(question || '').trim();
   if (!question) { out.innerHTML = ''; return; }
   var ans = askDocs(question);
-  var html = '<div class="ask-answer">';
+  var html = '<div class="ask-answer"><p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p>';
   if (ans.weak) {
     html += '<p class="ask-fallback">Chưa tìm được văn bản đủ khớp với mô tả “' + esc(question) + '”. ' +
       'Đã chuyển sang tìm kiếm từ khóa' + (ans.keywords ? ' với “<b>' + esc(ans.keywords) + '</b>”' : '') +
       ' ở bên dưới. Bạn có thể mô tả rõ hơn tên hàng, chất liệu hoặc công dụng.</p>';
   } else {
-    html += '<div class="ask-summary"><span>Mã HS gợi ý:</span>' + ans.hsList.map(function (h) {
+    html += '<div class="ask-summary"><span>Mã HS trong các văn bản dưới đây:</span>' + ans.hsList.map(function (h) {
       return '<span class="ask-hs-pill ' + confClass(h.level) + '">' + esc(h.hs) +
         ' <small>' + h.count + ' văn bản</small></span>';
     }).join('') + '</div>';
@@ -1461,7 +1473,7 @@ function renderAsk(question) {
     }
     html += '<ol class="ask-list">' + ans.results.map(function (r, i) { return askResultHtml(r, i + 1); }).join('') + '</ol>';
   }
-  html += '<p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p></div>';
+  html += '</div>';
   out.innerHTML = html;
   if (ans.weak) {
     var q = $('#q');
