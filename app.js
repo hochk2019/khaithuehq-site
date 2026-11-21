@@ -559,7 +559,7 @@ function askPool() {
 /* Mỗi gợi ý: {text, html, kind, action: 'ask' | 'open', ma?}. */
 function askSuggest(text) {
   var raw = String(text == null ? '' : text);
-  var words = raw.trim().split(/\s+/).filter(function (w) { return norm(w); });
+  var words = raw.trim().split(/\s+/).filter(Boolean);
   if (!words.length || norm(raw).length < 2) return [];
   var endsSpace = /\s$/.test(raw), pool = askPool(), sp = suggestPool();
   var out = [], seen = {};
@@ -601,6 +601,8 @@ function askSuggest(text) {
     var levels = [];
     for (var k = Math.min(4, ws.length); k >= 1; k--) {
       var tailWs = ws.slice(ws.length - k), tail = norm(tailWs.join(' '));
+      /* Ký hiệu rời ("-", "%") giữ nguyên ở phần đầu câu, không ghép vào cụm cần khớp. */
+      if (tailWs.some(function (w) { return !norm(w); })) continue;
       if (!tail || (k === 1 && tail.length < 2 && !endsSpace)) continue;
       var typedWs = tailWs.map(viKey), typed = typedWs.join(' '), first = tail.split(' ')[0], lists;
       if (k === 1 && !endsSpace) {
@@ -674,7 +676,10 @@ function askSuggest(text) {
   phraseMatches(words, false).forEach(push);
   /* Không có cụm nào khớp tiền tố: sửa từ cuối theo từ gần giống trong kho. */
   var nl = norm(lastRaw);
-  if (!out.length && nl.length >= 3 && !/\d/.test(nl) && !pool.map[nl]) {
+  /* Từ cuối có trong kho và (nối được với từ trước hoặc là từ phổ biến): không cần sửa. */
+  var prevNl = words.length > 1 ? norm(words[words.length - 2]) : '';
+  var known = pool.map[nl] && (!prevNl || pool.pairs[prevNl + ' ' + nl] || pool.map[nl].n >= 5);
+  if (!out.length && nl.length >= 3 && !/\d/.test(nl) && !known) {
     var md = nl.length >= 7 ? 2 : 1, fixes = [];
     /* Từ cuối đã gõ có dấu thì so cả dấu ("suất" không thành "sữa"). */
     var vl = viKey(lastRaw), useDia = vl !== nl;
