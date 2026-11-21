@@ -855,17 +855,19 @@ function askDocs(question, opts) {
     if (!d.ma_hs) continue;
     var score = 0, got = 0, matched = [], missing = [], head = false;
     concepts.forEach(function (c) {
-      var best = null;
+      var best = null, full = false;
       c.vars.forEach(function (vv) {
         var r = termInDoc(x, vv.t);
         if (!r.score) return;
+        if (!vv.part && (r.field === 'p' || r.field === 'r')) full = true;
         var s = r.score * vv.w * vv.stat.idf * (r.head ? 1.2 : 1);
         if (!best || s > best.s) best = { s: s, r: r, vv: vv };
       });
       if (!best) { missing.push(c); return; }
       score += best.s * NL_CAT_WEIGHT[c.cat];
       got += c.weight * Math.min(1, best.vv.w) * (best.r.field === 'p' || best.r.field === 'r' ? 1 : 0.8);
-      matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '' });
+      matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '',
+        full: full });
       if (best.r.head && c.cat !== 'use' && !best.vv.part) head = true;
     });
     var conflict = '';
@@ -908,7 +910,7 @@ function askDocs(question, opts) {
   var headC = concepts.filter(function (c) { return c.cat !== 'use'; })[0] || concepts[0];
   if (headC) good = good.filter(function (r) {
     return r === top || r.hsHit || r.matched.some(function (m) {
-      return m.c === headC && !m.part && (m.field === 'p' || m.field === 'r');
+      return m.c === headC && m.full;
     });
   });
   var picked = [], perHs = {}, rest = [];
@@ -1129,13 +1131,13 @@ function cpAttrs(text) {
         });
       }
       if (hit) {
-        if (hit.t.indexOf('đã ') === 0) neg = -99;
+        if (hit.t.indexOf('đã ') === 0 || hit.t.indexOf('dạng ') === 0) neg = -99;
         if (i - neg > 8 && found[hit.g].indexOf(hit.t) === -1) found[hit.g].push(hit.t);
         i += hit.len;
         continue;
       }
       if (w[i] === 'chưa' || w[i] === 'không') neg = i;
-      else if (w[i] === 'đã') neg = -99;
+      else if (w[i] === 'đã' || w[i] === 'dạng') neg = -99;
       i++;
     }
   });
