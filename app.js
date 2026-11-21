@@ -855,17 +855,23 @@ function askDocs(question, opts) {
     if (!d.ma_hs) continue;
     var score = 0, got = 0, matched = [], missing = [], head = false;
     concepts.forEach(function (c) {
-      var best = null;
+      var best = null, full = false;
       c.vars.forEach(function (vv) {
         var r = termInDoc(x, vv.t);
         if (!r.score) return;
+        /* Từ được gõ có dấu thì "khớp đủ" phải đúng cả dấu ("dầu cọ" không tính "dầu có"). */
+        var folded = !vv.t.dia && c.vars.some(function (v2) {
+          return v2.t.dia && !v2.part && norm(v2.t.key) === vv.t.key;
+        });
+        if (!vv.part && !folded && (r.field === 'p' || r.field === 'r')) full = true;
         var s = r.score * vv.w * vv.stat.idf * (r.head ? 1.2 : 1);
         if (!best || s > best.s) best = { s: s, r: r, vv: vv };
       });
       if (!best) { missing.push(c); return; }
       score += best.s * NL_CAT_WEIGHT[c.cat];
       got += c.weight * Math.min(1, best.vv.w) * (best.r.field === 'p' || best.r.field === 'r' ? 1 : 0.8);
-      matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '' });
+      matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '',
+        full: full });
       if (best.r.head && c.cat !== 'use' && !best.vv.part) head = true;
     });
     var conflict = '';
@@ -876,15 +882,15 @@ function askDocs(question, opts) {
       if (other.length) conflict = other[0] + ' (câu hỏi: ' + asked.join(', ') + ')';
     });
     if (conflict) score *= 0.5;
-    var hsD = hsDigits(d.ma_hs);
+    var hsD = hsDigits(d.ma_hs), hsHit = false;
     parsed.hs.forEach(function (h) {
-      if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
+      if (hsD.indexOf(h) === 0) { hsHit = true; score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
     });
     if (!score) continue;
     var coverage = totalW ? Math.min(1, got / totalW) : (head ? 1 : 0.5);
     if (x.cancel) score *= 0.5;
     out.push({ doc: d, i: i, score: score * (0.5 + coverage), coverage: coverage,
-      matched: matched, missing: missing, head: head, cancel: x.cancel, conflict: conflict });
+      matched: matched, missing: missing, head: head, hsHit: hsHit, cancel: x.cancel, conflict: conflict });
   }
   out.sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score;
@@ -903,6 +909,14 @@ function askDocs(question, opts) {
   if (base.weak) return base;
   /* Tối đa 3 văn bản cùng một mã HS để còn chỗ cho mã thay thế. */
   var good = out.filter(function (r) { return r.coverage >= 0.4; });
+  /* Các hạng sau hạng 1 phải trùng mã HS được hỏi, hoặc khớp từ chỉ mặt hàng chính (từ đầu câu hỏi)
+     ở tên hàng hoặc kết quả phân loại; tránh kết quả lấp chỗ chỉ trùng một từ chung. */
+  var headC = concepts.filter(function (c) { return c.cat !== 'use'; })[0] || concepts[0];
+  if (headC) good = good.filter(function (r) {
+    return r === top || r.hsHit || r.matched.some(function (m) {
+      return m.c === headC && m.full;
+    });
+  });
   var picked = [], perHs = {}, rest = [];
   good.forEach(function (r) {
     if (picked.length >= limit) return;
@@ -948,6 +962,235 @@ function askReason(r) {
   return s;
 }
 
+/* ================= Phân biệt mã dễ nhầm =================
+   Cặp văn bản có tên hàng/mô tả gần giống nhau nhưng mã HS khác nhau,
+   phát hiện tự động bằng độ giống cosine (TF-IDF) trên mat_hang, trich_yeu và phần mô tả. */
+var CP_MIN = 0.26;
+var CP_STOP = ('mã hàng mới hiệu không nhãn model mét cuộn kt khổ định lượng kích thước trọng lượng ' +
+  'nsx nhà sản xuất xuất xứ đóng gói gói hộp thùng bao chai lọ túi kg gam gram cái chiếc bộ ' +
+  'và của cho các có được loại dạng là từ với theo trong để dùng sử dụng làm một hai khoảng ' +
+  'thành phần gồm chứa tỷ lệ hàng hóa sản phẩm tên thông báo kết quả phân tích phân loại ' +
+  'xác định trước số mẫu khai báo nêu tại tờ khai đã chưa lot hsd cb ctcvn batch date').split(' ');
+var CP_STOP_SET = {};
+CP_STOP.forEach(function (w) { CP_STOP_SET[w] = 1; });
+/* Cặp mẫu biên soạn tay, luôn đứng đầu danh sách. */
+var CP_SEED = [{
+  a: '1440/TBKQPTPL-Đ3', b: '1419/TBKQPTPL-Đ3',
+  title: 'Vải polyester bọc sofa: dệt thoi (5407.53.00) hay dệt kim tạo lông (6001.92.90)?',
+  lead: 'Hai lô vải cùng 100% polyester, cùng đã nhuộm, cùng dùng để bọc sofa, cùng một doanh nghiệp ' +
+    'và cùng một tờ khai, nhưng được xếp vào hai chương khác nhau. Điều quyết định là cấu trúc vải, ' +
+    'không phải chất liệu hay công dụng.',
+  points: [
+    'Cấu trúc: 1440 là vải dệt thoi, kiểu dệt phức tạp (không phải kiểu dệt đặc biệt của Chương 58); ' +
+      '1419 là vải dệt kim tạo vòng lông một mặt, vòng lông đã được cắt.',
+    'Loại sợi: lớp vải chính của 1440 dệt từ sợi filament polyester nên vào nhóm 54.07 (vải dệt thoi ' +
+      'bằng sợi filament tổng hợp); 1419 là vải nổi vòng dệt kim từ xơ polyester nên vào nhóm 60.01.',
+    'Lớp ép: 1440 có một mặt ép dán lớp vải không dệt polyester (25,2% khối lượng), nhưng lớp dệt thoi ' +
+      '(74,8%) là lớp chính quyết định mã; 1419 chưa ngâm tẩm, tráng phủ hay ép lớp.',
+    'Khi khai báo vải bọc nội thất: ghi "100% polyester, bọc sofa" là chưa đủ để chọn mã. Cần xác định ' +
+      'dệt thoi hay dệt kim, có nổi vòng hay không, và sợi filament hay xơ.'
+  ]
+}];
+/* Thuộc tính thường quyết định mã: so hai bên để tìm điểm khác. */
+var CP_ATTRS = [
+  { label: 'Cấu trúc vải', terms: ['dệt thoi', 'dệt kim', 'không dệt', 'nổi vòng', 'vòng lông', 'tạo lông',
+    'sơnin', 'chenille', 'ép lớp', 'ép dán', 'tráng phủ', 'ngâm tẩm', 'đã nhuộm', 'đã in', 'đàn hồi',
+    'sợi filament', 'xơ staple', 'sợi đơn', 'sợi xe'] },
+  { label: 'Dạng / hình thức', terms: ['dạng bột', 'dạng lỏng', 'dạng viên', 'viên nén', 'viên nang', 'dạng hạt',
+    'dạng cuộn', 'dạng thanh', 'dạng tấm', 'dạng que', 'dạng ống', 'dạng sợi', 'dạng gel', 'dạng kem',
+    'dạng khối', 'dạng dây', 'dạng lá', 'dạng mảnh', 'dạng nhũ tương', 'dạng huyền phù', 'dạng cốm'] },
+  { label: 'Gia công / thành phần', terms: ['cán nóng', 'cán nguội', 'mạ kẽm', 'mạ', 'sơn phủ', 'đúc', 'rèn',
+    'đông lạnh', 'sấy khô', 'rang', 'lên men', 'tinh chế', 'thủy phân', 'đã qua xử lý', 'chưa qua xử lý',
+    'không hợp kim', 'hợp kim', 'đã cắt', 'không cắt', 'không gỉ'] },
+  { label: 'Chất liệu', terms: NL_MATERIAL_PHRASES.filter(function (t) { return t !== 'hợp kim'; })
+    .concat(NL_MATERIAL.filter(function (t) { return hasDia(t) || !/^(thep|nhom|nhua)$/.test(t); })) }
+];
+CP_ATTRS.forEach(function (g) {
+  g.keys = g.terms.slice().sort(function (a, b) { return b.length - a.length; })
+    .map(function (t) { var k = viKey(t); return { t: t, w: k, len: k.split(' ').length }; });
+});
+
+var _cp = null;
+function cpWords(text) {
+  return viKey(text).split(' ').filter(function (w) {
+    return w.length > 1 && !/\d/.test(w) && !CP_STOP_SET[w];
+  });
+}
+function cpFeatures(text, w, into) {
+  var ws = cpWords(text);
+  ws.forEach(function (t, i) {
+    into[t] = Math.max(into[t] || 0, w);
+    if (i) { var bg = ws[i - 1] + ' ' + t; into[bg] = Math.max(into[bg] || 0, w * 1.5); }
+  });
+}
+function cpSim(x, y) {
+  var s = 0;
+  Object.keys(x.v).forEach(function (k) { if (y.v[k]) s += x.v[k] * y.v[k]; });
+  return s / (x.n * y.n);
+}
+function cpData() {
+  if (_cp) return _cp;
+  var docs = [], df = {}, byMa = {};
+  DOCS.forEach(function (d) {
+    if (!hsDigits(d.ma_hs)) return;
+    var f = {};
+    cpFeatures(d.mat_hang || d.trich_yeu, 1, f);
+    cpFeatures(d.trich_yeu, 0.6, f);
+    cpFeatures(parseDocDetail(d).sec2, 0.4, f);
+    var x = { d: d, f: f };
+    docs.push(x); byMa[d.ma] = x;
+    Object.keys(f).forEach(function (k) { df[k] = (df[k] || 0) + 1; });
+  });
+  var N = docs.length, post = {};
+  docs.forEach(function (x, a) {
+    var nn = 0, v = {};
+    Object.keys(x.f).forEach(function (k) {
+      var wt = x.f[k] * Math.log(N / df[k]);
+      if (wt > 0) { v[k] = wt; nn += wt * wt; }
+    });
+    x.v = v; x.n = Math.sqrt(nn) || 1; x.hs = hsDigits(x.d.ma_hs);
+    Object.keys(v).forEach(function (k) {
+      if (df[k] >= 2 && df[k] <= N * 0.15) (post[k] = post[k] || []).push(a);
+    });
+  });
+  var dot = {};
+  Object.keys(post).forEach(function (k) {
+    var L = post[k];
+    for (var p = 0; p < L.length; p++) {
+      for (var q = p + 1; q < L.length; q++) {
+        var a = L[p], b = L[q];
+        if (docs[a].hs === docs[b].hs) continue;
+        var key = a * N + b;
+        dot[key] = (dot[key] || 0) + docs[a].v[k] * docs[b].v[k];
+      }
+    }
+  });
+  var groups = {}, list = [], forDoc = {};
+  function addPair(A, B, sim, seed) {
+    if (!seed && hsDigits(A.ma_hs) > hsDigits(B.ma_hs)) { var t = A; A = B; B = t; }
+    var gk = [hsDigits(A.ma_hs), hsDigits(B.ma_hs)].sort().join('|');
+    var g = groups[gk];
+    if (!g) { g = groups[gk] = { pairs: [] }; list.push(g); }
+    var pair = { a: A, b: B, sim: sim, seed: seed || null };
+    if (seed) { g.pairs.unshift(pair); g.seed = seed; } else g.pairs.push(pair);
+    [A, B].forEach(function (d) { (forDoc[d.ma] = forDoc[d.ma] || []).push(pair); });
+  }
+  var seeded = {};
+  CP_SEED.forEach(function (s) {
+    var A = null, B = null;
+    docs.forEach(function (x) { if (x.d.so_hieu === s.a) A = x; if (x.d.so_hieu === s.b) B = x; });
+    if (!A || !B) return;
+    seeded[A.d.ma + '-' + B.d.ma] = seeded[B.d.ma + '-' + A.d.ma] = 1;
+    addPair(A.d, B.d, cpSim(A, B), s);
+  });
+  Object.keys(dot).forEach(function (key) {
+    var a = Math.floor(key / N), b = key % N;
+    /* dot chỉ tính từ hiếm nên luôn nhỏ hơn cosine đầy đủ; bỏ sớm cặp quá xa để đỡ tốn thời gian. */
+    if (dot[key] / (docs[a].n * docs[b].n) < CP_MIN / 2) return;
+    var sim = cpSim(docs[a], docs[b]);
+    if (sim < CP_MIN || seeded[docs[a].d.ma + '-' + docs[b].d.ma]) return;
+    addPair(docs[a].d, docs[b].d, sim);
+  });
+  list.forEach(function (g) {
+    g.pairs.sort(function (p, q) { return (q.seed ? 1 : 0) - (p.seed ? 1 : 0) || q.sim - p.sim; });
+    g.best = g.pairs[0];
+  });
+  list.sort(function (g, h) { return (h.seed ? 1 : 0) - (g.seed ? 1 : 0) || h.best.sim - g.best.sim; });
+  Object.keys(forDoc).forEach(function (ma) {
+    forDoc[ma].sort(function (p, q) { return (q.seed ? 1 : 0) - (p.seed ? 1 : 0) || q.sim - p.sim; });
+  });
+  _cp = { groups: list, forDoc: forDoc, byMa: byMa, df: df, N: N };
+  return _cp;
+}
+function cpGroupOf(a, b) {
+  var gk = [hsDigits(a.ma_hs), hsDigits(b.ma_hs)].sort().join('|'), found = null;
+  cpData().groups.forEach(function (g) {
+    if ([hsDigits(g.best.a.ma_hs), hsDigits(g.best.b.ma_hs)].sort().join('|') === gk) found = g;
+  });
+  return found;
+}
+/* Các cặp liên quan một văn bản, mỗi mã HS bên kia lấy một cặp giống nhất. */
+function cpForDoc(ma) {
+  var seen = {}, out = [];
+  (cpData().forDoc[ma] || []).forEach(function (p) {
+    var other = String(p.a.ma) === String(ma) ? p.b : p.a;
+    if (seen[other.ma_hs]) return;
+    seen[other.ma_hs] = 1;
+    out.push({ pair: p, other: other });
+  });
+  return out;
+}
+/* Thuộc tính có trong văn bản; bỏ qua thuộc tính bị phủ định ("chưa ngâm tẩm, tráng phủ hay ép lớp",
+   "không chứa sợi đàn hồi") trong khoảng 8 từ sau "chưa"/"không" của cùng một câu. */
+function cpAttrs(text) {
+  var found = CP_ATTRS.map(function () { return []; });
+  String(text || '').split(/[.;()\n]+/).forEach(function (seg) {
+    var w = viKey(seg).split(' '), neg = -99, i = 0;
+    while (i < w.length) {
+      var hit = null;
+      for (var g = 0; g < CP_ATTRS.length && !hit; g++) {
+        CP_ATTRS[g].keys.forEach(function (x) {
+          if (hit && hit.len >= x.len) return;
+          if (w.slice(i, i + x.len).join(' ') === x.w) hit = { g: g, t: x.t, len: x.len };
+        });
+      }
+      if (hit) {
+        if (hit.t.indexOf('đã ') === 0 || hit.t.indexOf('dạng ') === 0) neg = -99;
+        if (i - neg > 8 && found[hit.g].indexOf(hit.t) === -1) found[hit.g].push(hit.t);
+        i += hit.len;
+        continue;
+      }
+      if (w[i] === 'chưa' || w[i] === 'không') neg = i;
+      else if (w[i] === 'đã' || w[i] === 'dạng') neg = -99;
+      i++;
+    }
+  });
+  return found;
+}
+function cpUse(text) {
+  var m = /(?:dùng để|dùng cho|dùng làm|dùng trong|sử dụng cho|sử dụng để|sử dụng trong|làm nguyên liệu)\s+[^,.;:()\n]{3,60}/i
+    .exec(text);
+  return m ? m[0].trim() : '';
+}
+function cpOther(det, re) {
+  var v = '';
+  det.other.forEach(function (l) { var m = re.exec(l); if (m && !v) v = m[1].trim().replace(/[.\s]+$/, ''); });
+  return v;
+}
+/* So sánh hai văn bản: điểm khác (theo nhóm thuộc tính) và điểm giống. */
+function cpDiff(a, b) {
+  var da = parseDocDetail(a), db = parseDocDetail(b), cp = cpData();
+  var ta = (a.mat_hang || a.trich_yeu || '') + ' . ' + da.sec2;
+  var tb = (b.mat_hang || b.trich_yeu || '') + ' . ' + db.sec2;
+  var aa = cpAttrs(ta), ab = cpAttrs(tb), diffs = [], same = [];
+  CP_ATTRS.forEach(function (g, i) {
+    var onlyA = aa[i].filter(function (t) { return ab[i].indexOf(t) === -1; });
+    var onlyB = ab[i].filter(function (t) { return aa[i].indexOf(t) === -1; });
+    var both = aa[i].filter(function (t) { return ab[i].indexOf(t) !== -1; });
+    if (onlyA.length || onlyB.length) diffs.push({ label: g.label, a: aa[i], b: ab[i] });
+    if (both.length) same.push(g.label + ': ' + both.join(', '));
+  });
+  var ua = cpUse(ta), ub = cpUse(tb);
+  if (ua && ub && norm(ua) === norm(ub)) same.push('Công dụng: ' + ua);
+  else if (ua || ub) diffs.push({ label: 'Công dụng', a: ua ? [ua] : [], b: ub ? [ub] : [] });
+  var wa = {}, wb = {};
+  cpWords(a.mat_hang || a.trich_yeu).forEach(function (w) { wa[w] = 1; });
+  cpWords(b.mat_hang || b.trich_yeu).forEach(function (w) { wb[w] = 1; });
+  function uniq(x, y) {
+    return Object.keys(x).filter(function (w) { return !y[w] && cp.df[w]; })
+      .sort(function (p, q) { return cp.df[p] - cp.df[q]; }).slice(0, 5);
+  }
+  var na = uniq(wa, wb), nb = uniq(wb, wa);
+  if (na.length || nb.length) diffs.push({ label: 'Từ chỉ có trong tên hàng', a: na, b: nb });
+  var ca = cpOther(da, /^Đơn vị XNK:\s*(.+)$/), cb = cpOther(db, /^Đơn vị XNK:\s*(.+)$/);
+  if (ca && norm(ca) === norm(cb)) same.push('Cùng đơn vị XNK: ' + ca);
+  var ka = cpOther(da, /^Tờ khai:\s*(.+)$/), kb = cpOther(db, /^Tờ khai:\s*(.+)$/);
+  if (ka && norm(ka) === norm(kb)) same.push('Cùng tờ khai: ' + ka);
+  var x = cp.byMa[a.ma], y = cp.byMa[b.ma];
+  return { a: a, b: b, da: da, db: db, diffs: diffs, same: same,
+    sim: x && y ? cpSim(x, y) : 0 };
+}
+
 /* Cho phép kiểm thử bằng Node: VBXNK.searchDocs(...) */
 if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
@@ -960,10 +1203,11 @@ if (typeof globalThis !== 'undefined') {
     extractDriveId: extractDriveId, highlight: highlight,
     viKey: viKey, parseQuestion: parseQuestion, askDocs: askDocs, askReason: askReason,
     NL_DISCLAIMER: NL_DISCLAIMER,
+    cpData: cpData, cpDiff: cpDiff, cpForDoc: cpForDoc, cpGroupOf: cpGroupOf,
     _pdfBlockHtml: pdfBlockHtml, _renderDetail: renderDetail,
     _setData: function (docs, drive, meta, img) {
       DOCS = docs; DRIVE = drive || {}; META = meta || {}; IMG = img || {};
-      _suggestPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {};
+      _suggestPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {}; _cp = null;
       buildIndex(docs);
     }
   };
@@ -1218,6 +1462,7 @@ function renderDetail(ma) {
     'Báo sai nội dung / link qua Messenger Trang Văn bản XNK</a>' +
     '</div></article>';
 
+  html += '<div id="cpRel"></div>';
   var rel = relatedDocs(doc);
   if (rel.length) {
     html += '<section class="related"><h2>Bài liên quan</h2>' +
@@ -1228,6 +1473,11 @@ function renderDetail(ma) {
       }).join('') + '</section>';
   }
   view.innerHTML = html;
+  /* Dò cặp dễ nhầm sau khi bài viết đã hiện, để lần mở đầu không phải chờ. */
+  setTimeout(function () {
+    var box = $('#cpRel');
+    if (box && location.hash.indexOf('#/bai/' + doc.ma) === 0) box.innerHTML = cpRelatedHtml(doc);
+  }, 0);
 
   var copyBtn = $('#copyBtn');
   if (copyBtn) copyBtn.addEventListener('click', function () {
@@ -1284,13 +1534,157 @@ function updateMeta(doc) {
   if (ogU) ogU.setAttribute('content', location.href.split('#')[0] + '#/bai/' + doc.ma);
 }
 
+/* ---------- Trang "Phân biệt mã dễ nhầm" ---------- */
+var _cpShown = PAGE_SIZE;
+function cpUrl(p) { return '#/phan-biet/' + p.a.ma + '-' + p.b.ma; }
+function sourceLinksHtml(d) {
+  var id = DRIVE[d.so_hieu];
+  var h = '<a class="btn" href="#/bai/' + d.ma + '">Xem văn bản</a>';
+  if (id) h += '<a class="btn ghost" href="' + driveViewUrl(id) + '" target="_blank" rel="noopener">PDF gốc</a>';
+  else if (d.pdf_url) h += '<a class="btn ghost" href="' + esc(d.pdf_url) + '" target="_blank" rel="noopener">PDF gốc</a>';
+  if (d.detail_url) {
+    h += '<a class="btn ghost" href="' + esc(d.detail_url) + '" target="_blank" rel="noopener">Nguồn customs.gov.vn</a>';
+  }
+  return h;
+}
+function cpSideMini(d) {
+  return '<div class="cmp-mini"><span class="ask-hs-pill">' + esc(d.ma_hs) + '</span>' +
+    '<b>' + esc(d.so_hieu) + '</b><p>' + esc(shortText(d.mat_hang || d.trich_yeu, 110)) + '</p></div>';
+}
+function cpPct(sim) { return Math.round(Math.min(1, sim) * 100) + '%'; }
+function cpCardHtml(g) {
+  var p = g.best, more = g.pairs.length - 1;
+  return '<a class="cmp-card" href="' + cpUrl(p) + '">' +
+    '<div class="cmp-card-top">' + (g.seed ? '<span class="cmp-seed">Cặp mẫu</span>' : '') +
+    (g.seed ? '' : '<span class="cmp-sim">Giống ' + cpPct(p.sim) + '</span>') +
+    '<span class="cmp-go">So sánh →</span></div>' +
+    (g.seed ? '<p class="cmp-card-title">' + esc(g.seed.title) + '</p>' : '') +
+    '<div class="cmp-vs">' + cpSideMini(p.a) + '<span class="cmp-vs-mark" aria-label="khác mã">≠</span>' +
+    cpSideMini(p.b) + '</div>' +
+    (more > 0 ? '<p class="cmp-more">+' + more + ' cặp văn bản khác giữa hai mã này</p>' : '') +
+    '</a>';
+}
+function renderCompareList() {
+  var groups = cpData().groups;
+  $('#resultInfo').textContent = 'Có ' + groups.length + ' cặp mã HS dễ nhầm, phát hiện tự động từ kho văn bản.';
+  var html = '<section class="cmp-page"><h1 class="page-title">Phân biệt mã dễ nhầm</h1>' +
+    '<p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p>' +
+    '<p class="cmp-intro">Các cặp văn bản có tên hàng, mô tả gần giống nhau nhưng được xếp vào mã HS khác nhau, ' +
+    'xếp theo mức độ giống nhau. Chọn một cặp để xem hai văn bản đặt cạnh nhau và điểm khác biệt quyết định.</p>' +
+    groups.slice(0, _cpShown).map(cpCardHtml).join('');
+  if (groups.length > _cpShown) {
+    html += '<button type="button" class="load-more" id="cpMore">Xem thêm (' + (groups.length - _cpShown) +
+      ' cặp nữa)</button>';
+  }
+  $('#view').innerHTML = html + '</section>';
+  var more = $('#cpMore');
+  if (more) more.addEventListener('click', function () { _cpShown += PAGE_SIZE; renderCompareList(); });
+  updateMeta(null);
+  var t = document.querySelector('title');
+  if (t) t.textContent = 'Phân biệt mã HS dễ nhầm | Văn bản XNK';
+}
+function cpTermsHtml(list) {
+  return list.length ? list.map(esc).join(', ') : '<span class="cmp-none">không ghi</span>';
+}
+function cpSideHtml(d, det, tag) {
+  return '<div class="cmp-side"><p class="cmp-side-tag">' + tag + '</p>' +
+    '<p class="cmp-side-hs"><span class="ask-hs-pill">' + esc(d.ma_hs) + '</span></p>' +
+    '<p class="sub"><a href="#/bai/' + d.ma + '"><b>' + esc(d.so_hieu) + '</b></a> · ' + esc(d.ngay || '') +
+    ' · ' + esc(LOAI_LABEL[d.loai] || 'Văn bản') + '</p>' +
+    '<h3>Tên hàng theo khai báo</h3><p>' + esc(det.sec1) + '</p>' +
+    '<h3>Tóm tắt mô tả</h3><p>' + esc(det.sec2) + '</p>' +
+    '<h3>Kết quả</h3><p class="hs-result">' + esc(det.sec3) + '</p>' +
+    '<div class="ask-links">' + sourceLinksHtml(d) + '</div></div>';
+}
+function renderCompare(maA, maB) {
+  var a = null, b = null;
+  DOCS.forEach(function (d) {
+    if (String(d.ma) === String(maA)) a = d;
+    if (String(d.ma) === String(maB)) b = d;
+  });
+  var view = $('#view');
+  if (!a || !b || a === b) {
+    view.innerHTML = '<p class="empty">Không tìm thấy cặp văn bản này trong kho.</p>' +
+      '<p><a href="#/phan-biet">← Danh sách mã dễ nhầm</a></p>';
+    updateMeta(null);
+    return;
+  }
+  var r = cpDiff(a, b), g = cpGroupOf(a, b), seed = null;
+  CP_SEED.forEach(function (s) {
+    if ((s.a === a.so_hieu && s.b === b.so_hieu) || (s.a === b.so_hieu && s.b === a.so_hieu)) seed = s;
+  });
+  var nA = esc(a.so_hieu.split('/')[0]), nB = esc(b.so_hieu.split('/')[0]);
+  $('#resultInfo').textContent = 'So sánh hai văn bản có tên hàng gần giống nhau nhưng khác mã HS.';
+  var html = '<a class="back-link" href="#/phan-biet">← Danh sách mã dễ nhầm</a>' +
+    '<article class="article cmp-article">' +
+    '<p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p>' +
+    '<h1>' + (seed ? esc(seed.title) : 'Phân biệt mã HS ' + esc(a.ma_hs) + ' và ' + esc(b.ma_hs)) + '</h1>' +
+    '<p class="sub">Văn bản ' + nA + ' (' + esc(a.ma_hs) + ') và văn bản ' + nB + ' (' + esc(b.ma_hs) + ')' +
+    (seed ? '' : ' · Độ giống tên hàng, mô tả: ' + cpPct(r.sim)) + '</p>';
+  if (seed) {
+    html += '<div class="cmp-lead"><p>' + esc(seed.lead) + '</p><ul>' +
+      seed.points.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+  }
+  html += '<h2>Điểm khác biệt' + (seed ? ' tìm thấy trong văn bản' : ' quyết định') + '</h2>';
+  if (r.diffs.length) {
+    html += '<div class="cmp-diff">' + r.diffs.map(function (x) {
+      return '<div class="cmp-diff-row"><p class="cmp-diff-label">' + esc(x.label) + '</p>' +
+        '<p><span class="cmp-tag">' + nA + '</span>' + cpTermsHtml(x.a) + '</p>' +
+        '<p><span class="cmp-tag cmp-tag-b">' + nB + '</span>' + cpTermsHtml(x.b) + '</p></div>';
+    }).join('') + '</div>';
+  } else {
+    html += '<p>Không thấy khác biệt rõ trong tên hàng. Hãy đọc kỹ phần mô tả và kết quả của hai văn bản bên dưới.</p>';
+  }
+  if (r.same.length) {
+    html += '<h2>Điểm giống nhau</h2><ul class="cmp-same">' +
+      r.same.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+  }
+  html += '<h2>Hai văn bản đặt cạnh nhau</h2><div class="cmp-grid">' +
+    cpSideHtml(a, r.da, 'Văn bản ' + nA) + cpSideHtml(b, r.db, 'Văn bản ' + nB) + '</div>' +
+    '<h2>Nguồn trích dẫn</h2><ol class="cmp-cite">' + [a, b].map(function (d) {
+      return '<li><a href="#/bai/' + d.ma + '"><b>' + esc(d.so_hieu) + '</b></a> ngày ' + esc(d.ngay || '') +
+        ', mã HS ' + esc(d.ma_hs) +
+        (d.detail_url ? ' · <a href="' + esc(d.detail_url) + '" target="_blank" rel="noopener">customs.gov.vn</a>' : '') +
+        '</li>';
+    }).join('') + '</ol></article>';
+  var others = g ? g.pairs.filter(function (p) {
+    return !((p.a === a && p.b === b) || (p.a === b && p.b === a));
+  }) : [];
+  if (others.length) {
+    html += '<section class="related"><h2>Các cặp văn bản khác giữa hai mã này</h2>' +
+      others.map(function (p) {
+        return '<a class="cmp-card" href="' + cpUrl(p) + '"><div class="cmp-card-top"><span class="cmp-sim">Giống ' +
+          cpPct(p.sim) + '</span><span class="cmp-go">So sánh →</span></div><div class="cmp-vs">' +
+          cpSideMini(p.a) + '<span class="cmp-vs-mark" aria-label="khác mã">≠</span>' + cpSideMini(p.b) +
+          '</div></a>';
+      }).join('') + '</section>';
+  }
+  view.innerHTML = html;
+  updateMeta(null);
+  var t = document.querySelector('title');
+  if (t) t.textContent = 'Phân biệt HS ' + a.ma_hs + ' và ' + b.ma_hs + ' | Văn bản XNK';
+  window.scrollTo(0, 0);
+}
+function cpRelatedHtml(doc) {
+  var list = cpForDoc(doc.ma).slice(0, 3);
+  if (!list.length) return '';
+  return '<section class="related"><h2>Dễ nhầm với</h2>' + list.map(function (x) {
+    var o = x.other;
+    return '<article class="card"><h3><a href="' + cpUrl(x.pair) + '">So sánh với ' + esc(o.so_hieu) +
+      '</a></h3><p class="sub">' + esc(o.ngay || '') + ' · ' + hsBadge(o) + ' · Giống ' + cpPct(x.pair.sim) +
+      '</p><p>' + esc(shortText(o.mat_hang || o.trich_yeu, 140)) + '</p></article>';
+  }).join('') + '</section>';
+}
+
 /* ================= Định tuyến & khởi động ================= */
 
 function route() {
   var h = location.hash || '#/';
   var m = /^#\/bai\/(\d+)/.exec(h);
-  document.body.classList.toggle('is-detail', !!m);
+  var pb = /^#\/phan-biet(?:\/(\d+)-(\d+))?/.exec(h);
+  document.body.classList.toggle('is-detail', !!m || !!pb);
   if (m) { renderDetail(m[1]); return; }
+  if (pb) { if (pb[1]) renderCompare(pb[1], pb[2]); else renderCompareList(); return; }
   var c = /^#\/chuong\/([0-9]{2}|khong-co-ma)/.exec(h);
   if (c) {
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
@@ -1412,11 +1806,13 @@ function activateSuggestion(i) {
   commitSearch(it.text);
 }
 /* Chốt một truy vấn: ghi lại lịch sử tìm, đồng bộ URL (?q=), hiển thị. */
+/* Trang riêng (bài viết, so sánh): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
+function onPageRoute() { return /^#\/(bai\/|phan-biet)/.test(location.hash); }
 function commitSearch(text) {
   state.query = text; state.shown = PAGE_SIZE;
   recordRecent(text);
   syncQueryToUrl();
-  if (location.hash.indexOf('#/bai/') === 0) location.hash = '#/';
+  if (onPageRoute()) location.hash = '#/';
   else renderList();
 }
 /* Đưa truy vấn vào URL (?q=) để link tìm kiếm chia sẻ được, nút Back hoạt
@@ -1456,7 +1852,7 @@ function askResultHtml(r, n) {
 function renderAsk(question, opts) {
   opts = opts || {};
   var out = $('#askOut');
-  var onDetail = location.hash.indexOf('#/bai/') === 0;
+  var onDetail = onPageRoute();
   if (!out) return;
   question = String(question || '').trim();
   if (!question) { out.innerHTML = ''; return; }
@@ -1555,7 +1951,7 @@ function boot() {
         state.query = q.value; state.shown = PAGE_SIZE;
         syncQueryToUrl();
         showSuggestions();
-        if (location.hash.indexOf('#/bai/') === 0) location.hash = '#/';
+        if (onPageRoute()) location.hash = '#/';
         else renderList();
       }, 150);
     });
