@@ -539,7 +539,7 @@ function askPool() {
   Object.keys(map).forEach(function (k) {
     var e = map[k], best = '', bn = 0;
     Object.keys(e.forms).forEach(function (t) { if (e.forms[t] > bn) { bn = e.forms[t]; best = t; } });
-    e.text = best; delete e.forms; delete e.docs;
+    e.text = best; if (e.len === 1) e.spell = e.forms; delete e.forms; delete e.docs;
     /* Cụm dừng giữa chừng ("phân bón hữu", "cảm biến vị") không đáng gợi ý: từ cuối
        gần như luôn đi kèm một từ sau. */
     var nx = next[best.split(' ').pop()], top = 0, topW = '';
@@ -678,7 +678,10 @@ function askSuggest(text) {
   var nl = norm(lastRaw);
   /* Từ cuối có trong kho và (nối được với từ trước hoặc là từ phổ biến): không cần sửa. */
   var prevNl = words.length > 1 ? norm(words[words.length - 2]) : '';
-  var known = pool.map[nl] && (!prevNl || pool.pairs[prevNl + ' ' + nl] || pool.map[nl].n >= 5);
+  /* Từ cuối có đúng cách viết này trong kho ("cápb" không tính là "CAPB"). */
+  var vlast = viKey(lastRaw), single0 = pool.map[nl];
+  var typedKnown = !!single0 && (vlast === nl || !!(single0.spell && single0.spell[vlast]));
+  var known = typedKnown && (!prevNl || pool.pairs[prevNl + ' ' + nl] || pool.map[nl].n >= 5);
   if (!out.length && nl.length >= 3 && !/\d/.test(nl) && !known) {
     var md = nl.length >= 7 ? 2 : 1, fixes = [];
     /* Từ cuối đã gõ có dấu thì so cả dấu ("suất" không thành "sữa"). */
@@ -689,10 +692,10 @@ function askSuggest(text) {
       var a = useDia ? vl : nl, b = useDia ? single.text : f;
       var d = lev(a, b, md);
       /* Từ đã có trong kho chỉ sửa theo cả từ ("tròn" không thành "trọng"). */
-      if (d > md && !endsSpace && !pool.map[nl] && a.length >= 4 && b.length > a.length &&
+      if (d > md && !endsSpace && !typedKnown && a.length >= 4 && b.length > a.length &&
           lev(a, b.slice(0, a.length), 1) <= 1) d = 1;
       /* Từ đã có trong kho chỉ được sửa thành cụm có thật với từ trước ("vải diệt" → "vải dệt"; "thép tròn" giữ nguyên). */
-      if (pool.map[nl] && prevNl && !pool.pairs[prevNl + ' ' + f]) return;
+      if (typedKnown && prevNl && !pool.pairs[prevNl + ' ' + f]) return;
       if (d <= md && f !== nl) fixes.push(single);
     });
     fixes.sort(function (a, b) { return b.n - a.n; }).slice(0, 3).forEach(function (e) {
