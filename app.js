@@ -564,7 +564,7 @@ function askSuggest(text) {
   var endsSpace = /\s$/.test(raw), pool = askPool(), sp = suggestPool();
   var out = [], seen = {};
   function push(it) {
-    var k = norm(it.text);
+    var k = it.ma ? 'ma:' + it.ma : norm(it.text);
     if (out.length >= 8 || seen[k]) return;
     seen[k] = 1; out.push(it);
   }
@@ -574,13 +574,16 @@ function askSuggest(text) {
   if (/\d/.test(lastRaw) && !endsSpace) {
     var lr = norm(lastRaw), dg = lastRaw.replace(/\D/g, '');
     if (words.length === 1) {
-      var nSo = 0;
-      sp.so.forEach(function (s) {
-        if (nSo < 3 && norm(s).indexOf(lr) === 0) {
-          nSo++;
-          push({ text: s, html: '<b>' + esc(s) + '</b>', kind: 'Văn bản · mở bài', action: 'open', ma: sp.soMa[s] });
-        }
-      });
+      /* Theo từng văn bản: cùng số hiệu ở các năm khác nhau vẫn hiện đủ. */
+      DOCS.filter(function (d) { return d.so_hieu && norm(d.so_hieu).indexOf(lr) === 0; })
+        .sort(function (a, b) {
+          var da = (a.ngay || '').split('/').reverse().join(''), db = (b.ngay || '').split('/').reverse().join('');
+          return a.so_hieu < b.so_hieu ? -1 : a.so_hieu > b.so_hieu ? 1 : da < db ? 1 : -1;
+        })
+        .slice(0, 4).forEach(function (d) {
+          push({ text: d.so_hieu, html: '<b>' + esc(d.so_hieu) + '</b>',
+            kind: 'Văn bản' + (d.ngay ? ' ' + d.ngay : '') + ' · mở bài', action: 'open', ma: d.ma });
+        });
     }
     if (dg.length >= 2 && /^[\d.]+$/.test(lastRaw)) {
       sp.hs.filter(function (h) { return hsDigits(h).indexOf(dg) === 0; })
