@@ -903,6 +903,14 @@ function askDocs(question, opts) {
   if (base.weak) return base;
   /* Tối đa 3 văn bản cùng một mã HS để còn chỗ cho mã thay thế. */
   var good = out.filter(function (r) { return r.coverage >= 0.4; });
+  /* Các hạng sau hạng 1 phải khớp từ chỉ mặt hàng chính (từ đầu câu hỏi) ở tên hàng
+     hoặc kết quả phân loại; tránh kết quả lấp chỗ chỉ trùng một từ chung. */
+  var headC = concepts.filter(function (c) { return c.cat !== 'use'; })[0] || concepts[0];
+  if (headC) good = good.filter(function (r) {
+    return r === top || r.matched.some(function (m) {
+      return m.c === headC && !m.part && (m.field === 'p' || m.field === 'r');
+    });
+  });
   var picked = [], perHs = {}, rest = [];
   good.forEach(function (r) {
     if (picked.length >= limit) return;
