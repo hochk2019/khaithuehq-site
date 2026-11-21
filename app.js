@@ -689,8 +689,15 @@ function askSuggest(text) {
     /* Chỉ sai dấu ("áp lức"): sửa thành cách viết có dấu trong kho ("áp lực"), không đổi sang từ khác. */
     var accentOnly = !!single0 && !typedKnown && useDia &&
       Object.keys(single0.spell || {}).some(hasDia);
-    if (accentOnly) fixes.push(single0);
-    else pool.firsts.forEach(function (f) {
+    if (accentOnly) {
+      var sp1 = single0.spell;
+      Object.keys(sp1).filter(hasDia).sort(function (a, b) { return sp1[b] - sp1[a]; })
+        .slice(0, 3).forEach(function (t) {
+          phraseMatches(words.slice(0, -1).concat([t]), true).slice(0, 3).forEach(push);
+        });
+    }
+    /* Không cách viết có dấu nào khớp ("nguyên kiệu"): sửa lỗi gõ như bình thường. */
+    if (!out.length) pool.firsts.forEach(function (f) {
       var single = pool.map[f];
       if (!single) return;
       var a = useDia ? vl : nl, b = useDia ? single.text : f;
