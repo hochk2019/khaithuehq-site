@@ -691,6 +691,8 @@ function askSuggest(text) {
       /* Từ đã có trong kho chỉ sửa theo cả từ ("tròn" không thành "trọng"). */
       if (d > md && !endsSpace && !pool.map[nl] && a.length >= 4 && b.length > a.length &&
           lev(a, b.slice(0, a.length), 1) <= 1) d = 1;
+      /* Từ đã có trong kho chỉ được sửa thành cụm có thật với từ trước ("vải diệt" → "vải dệt"; "thép tròn" giữ nguyên). */
+      if (pool.map[nl] && prevNl && !pool.pairs[prevNl + ' ' + f]) return;
       if (d <= md && f !== nl) fixes.push(single);
     });
     fixes.sort(function (a, b) { return b.n - a.n; }).slice(0, 3).forEach(function (e) {
