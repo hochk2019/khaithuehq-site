@@ -1453,8 +1453,10 @@ function askResultHtml(r, n) {
     '<div class="ask-links">' + links + '</div>' +
     '</li>';
 }
-function renderAsk(question) {
+function renderAsk(question, opts) {
+  opts = opts || {};
   var out = $('#askOut');
+  var onDetail = location.hash.indexOf('#/bai/') === 0;
   if (!out) return;
   question = String(question || '').trim();
   if (!question) { out.innerHTML = ''; return; }
@@ -1480,10 +1482,14 @@ function renderAsk(question) {
   }
   html += '</div>';
   out.innerHTML = html;
+  /* Câu hỏi khôi phục từ URL không được đẩy người đọc rời trang văn bản. */
+  if (opts.restore && onDetail) return;
   if (ans.weak) {
     var q = $('#q');
     if (q) q.value = ans.keywords || question;
     commitSearch(ans.keywords || question);
+  } else if (onDetail) {
+    location.hash = '#/';
   }
 }
 function wireAsk() {
@@ -1509,7 +1515,7 @@ function wireAsk() {
   });
   try {
     var initial = new URLSearchParams(location.search).get('hoi');
-    if (initial) { input.value = initial; renderAsk(initial); }
+    if (initial) { input.value = initial; renderAsk(initial, { restore: true }); }
   } catch (e) { /* bỏ qua */ }
 }
 function syncAskToUrl(text) {
