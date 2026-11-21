@@ -686,7 +686,11 @@ function askSuggest(text) {
     var md = nl.length >= 7 ? 2 : 1, fixes = [];
     /* Từ cuối đã gõ có dấu thì so cả dấu ("suất" không thành "sữa"). */
     var vl = viKey(lastRaw), useDia = vl !== nl;
-    pool.firsts.forEach(function (f) {
+    /* Chỉ sai dấu ("áp lức"): sửa thành cách viết có dấu trong kho ("áp lực"), không đổi sang từ khác. */
+    var accentOnly = !!single0 && !typedKnown && useDia &&
+      Object.keys(single0.spell || {}).some(hasDia);
+    if (accentOnly) fixes.push(single0);
+    else pool.firsts.forEach(function (f) {
       var single = pool.map[f];
       if (!single) return;
       var a = useDia ? vl : nl, b = useDia ? single.text : f;
