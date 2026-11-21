@@ -908,7 +908,7 @@ function askDocs(question, opts) {
   var headC = concepts.filter(function (c) { return c.cat !== 'use'; })[0] || concepts[0];
   if (headC) good = good.filter(function (r) {
     return r === top || r.hsHit || r.matched.some(function (m) {
-      return m.c === headC && (m.field === 'p' || (m.field === 'r' && !m.part));
+      return m.c === headC && !m.part && (m.field === 'p' || m.field === 'r');
     });
   });
   var picked = [], perHs = {}, rest = [];
@@ -1079,6 +1079,8 @@ function cpData() {
   });
   Object.keys(dot).forEach(function (key) {
     var a = Math.floor(key / N), b = key % N;
+    /* dot chỉ tính từ hiếm nên luôn nhỏ hơn cosine đầy đủ; bỏ sớm cặp quá xa để đỡ tốn thời gian. */
+    if (dot[key] / (docs[a].n * docs[b].n) < CP_MIN / 2) return;
     var sim = cpSim(docs[a], docs[b]);
     if (sim < CP_MIN || seeded[docs[a].d.ma + '-' + docs[b].d.ma]) return;
     addPair(docs[a].d, docs[b].d, sim);
@@ -1454,7 +1456,7 @@ function renderDetail(ma) {
     'Báo sai nội dung / link qua Messenger Trang Văn bản XNK</a>' +
     '</div></article>';
 
-  html += cpRelatedHtml(doc);
+  html += '<div id="cpRel"></div>';
   var rel = relatedDocs(doc);
   if (rel.length) {
     html += '<section class="related"><h2>Bài liên quan</h2>' +
@@ -1465,6 +1467,11 @@ function renderDetail(ma) {
       }).join('') + '</section>';
   }
   view.innerHTML = html;
+  /* Dò cặp dễ nhầm sau khi bài viết đã hiện, để lần mở đầu không phải chờ. */
+  setTimeout(function () {
+    var box = $('#cpRel');
+    if (box && location.hash.indexOf('#/bai/' + doc.ma) === 0) box.innerHTML = cpRelatedHtml(doc);
+  }, 0);
 
   var copyBtn = $('#copyBtn');
   if (copyBtn) copyBtn.addEventListener('click', function () {
