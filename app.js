@@ -573,7 +573,7 @@ function askSuggest(text) {
   /* Số hiệu văn bản (mở thẳng bài) và mã HS theo tiền tố. */
   if (/\d/.test(lastRaw) && !endsSpace) {
     var lr = norm(lastRaw), dg = lastRaw.replace(/\D/g, '');
-    if (words.length === 1) {
+    if (words.filter(function (w) { return norm(w); }).length === 1) {
       /* Theo từng văn bản: cùng số hiệu ở các năm khác nhau vẫn hiện đủ. */
       DOCS.filter(function (d) { return d.so_hieu && norm(d.so_hieu).indexOf(lr) === 0; })
         .sort(function (a, b) {
