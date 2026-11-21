@@ -680,10 +680,15 @@ var NL_DISCLAIMER = 'Kết quả chỉ mang tính tham khảo, dựa trên các 
 
 /* Tách câu hỏi thành đơn vị nội dung {raw, n, cat, seg, pos, words}. */
 function parseQuestion(text) {
+  var hsQ = [];
+  /* Mã HS có dấu chấm (8421.99.94) lấy riêng trước khi bỏ dấu câu. */
+  text = String(text == null ? '' : text).replace(/\b\d{4}(?:\.\d{2}){1,3}\b/g, function (m) {
+    hsQ.push(m.replace(/\./g, '')); return ' ';
+  });
   var toks = viKey(text).split(' ').filter(Boolean).map(function (r) {
     return { raw: r, n: norm(r) };
   });
-  var units = [], hsQ = [], cat = 'goods', seg = 0, i = 0;
+  var units = [], cat = 'goods', seg = 0, i = 0;
   function joinN(a, len) {
     return toks.slice(a, a + len).map(function (t) { return t.n; }).join(' ');
   }
