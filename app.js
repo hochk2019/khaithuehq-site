@@ -679,7 +679,8 @@ function askSuggest(text) {
       if (!single) return;
       var a = useDia ? vl : nl, b = useDia ? single.text : f;
       var d = lev(a, b, md);
-      if (d > md && !endsSpace && a.length >= 4 && b.length > a.length) d = lev(a, b.slice(0, a.length), 1);
+      if (d > md && !endsSpace && a.length >= 4 && b.length > a.length &&
+          lev(a, b.slice(0, a.length), 1) <= 1) d = 1;
       if (d <= md && f !== nl) fixes.push(single);
     });
     fixes.sort(function (a, b) { return b.n - a.n; }).slice(0, 3).forEach(function (e) {
