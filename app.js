@@ -881,7 +881,7 @@ function askDocs(question, opts) {
       if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
     });
     if (!score) continue;
-    var coverage = totalW ? Math.min(1, got / totalW) : 0.5;
+    var coverage = totalW ? Math.min(1, got / totalW) : (head ? 1 : 0.5);
     if (x.cancel) score *= 0.5;
     out.push({ doc: d, i: i, score: score * (0.5 + coverage), coverage: coverage,
       matched: matched, missing: missing, head: head, cancel: x.cancel, conflict: conflict });
