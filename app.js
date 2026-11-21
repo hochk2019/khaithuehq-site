@@ -559,7 +559,7 @@ function askPool() {
 /* Mỗi gợi ý: {text, html, kind, action: 'ask' | 'open', ma?}. */
 function askSuggest(text) {
   var raw = String(text == null ? '' : text);
-  var words = raw.trim().split(/\s+/).filter(Boolean);
+  var words = raw.trim().split(/\s+/).filter(function (w) { return norm(w); });
   if (!words.length || norm(raw).length < 2) return [];
   var endsSpace = /\s$/.test(raw), pool = askPool(), sp = suggestPool();
   var out = [], seen = {};
