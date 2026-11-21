@@ -878,7 +878,7 @@ function askDocs(question, opts) {
     if (conflict) score *= 0.5;
     var hsD = hsDigits(d.ma_hs);
     parsed.hs.forEach(function (h) {
-      if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; }
+      if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; if (!concepts.length) head = true; }
     });
     if (!score) continue;
     var coverage = totalW ? Math.min(1, got / totalW) : 0.5;
