@@ -856,10 +856,12 @@ function askDocs(question, opts) {
     var score = 0, got = 0, matched = [], missing = [], head = false;
     concepts.forEach(function (c) {
       var best = null, full = false;
+      /* Câu hỏi có dấu thì "khớp đủ" phải đúng cả dấu ("dầu cọ" không tính "dầu có"). */
+      var needDia = c.vars.some(function (vv) { return vv.t.dia && !vv.part; });
       c.vars.forEach(function (vv) {
         var r = termInDoc(x, vv.t);
         if (!r.score) return;
-        if (!vv.part && (r.field === 'p' || r.field === 'r')) full = true;
+        if (!vv.part && (vv.t.dia || !needDia) && (r.field === 'p' || r.field === 'r')) full = true;
         var s = r.score * vv.w * vv.stat.idf * (r.head ? 1.2 : 1);
         if (!best || s > best.s) best = { s: s, r: r, vv: vv };
       });
