@@ -75,6 +75,7 @@ a:hover { color: var(--accent); }
 .ask-row .ask-suggest button { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .ask-row .ask-suggest .sugg-text { min-width: 0; overflow-wrap: anywhere; }
 .ask-row .ask-suggest .sugg-text b { color: var(--navy); }
+.ask-row .ask-suggest .sugg-sub { display: block; color: var(--muted); font-size: .82rem; margin-top: 2px; }
 .ask-row .ask-suggest .kind { flex: none; white-space: nowrap; }
 @media (max-width: 480px) {
   .ask-row .ask-suggest button { flex-direction: column; gap: 2px; }

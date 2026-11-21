@@ -581,8 +581,9 @@ function askSuggest(text) {
           return a.so_hieu < b.so_hieu ? -1 : a.so_hieu > b.so_hieu ? 1 : da < db ? 1 : -1;
         })
         .slice(0, 4).forEach(function (d) {
-          push({ text: d.so_hieu, html: '<b>' + esc(d.so_hieu) + '</b>',
-            kind: 'Văn bản' + (d.ngay ? ' ' + d.ngay : '') + ' · mở bài', action: 'open', ma: d.ma });
+          push({ text: d.so_hieu, html: '<b>' + esc(d.so_hieu) + '</b>' +
+              '<span class="sugg-sub">' + esc(shortText(d.trich_yeu || d.mat_hang || '', 70)) + '</span>',
+            kind: (d.ngay ? d.ngay + ' · ' : '') + 'mở bài', action: 'open', ma: d.ma });
         });
     }
     if (dg.length >= 2 && /^[\d.]+$/.test(lastRaw)) {
