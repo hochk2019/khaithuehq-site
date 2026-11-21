@@ -688,7 +688,8 @@ function askSuggest(text) {
       if (!single) return;
       var a = useDia ? vl : nl, b = useDia ? single.text : f;
       var d = lev(a, b, md);
-      if (d > md && !endsSpace && a.length >= 4 && b.length > a.length &&
+      /* Từ đã có trong kho chỉ sửa theo cả từ ("tròn" không thành "trọng"). */
+      if (d > md && !endsSpace && !pool.map[nl] && a.length >= 4 && b.length > a.length &&
           lev(a, b.slice(0, a.length), 1) <= 1) d = 1;
       if (d <= md && f !== nl) fixes.push(single);
     });
