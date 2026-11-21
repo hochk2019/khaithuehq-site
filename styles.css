@@ -70,7 +70,17 @@ a:hover { color: var(--accent); }
 .ask-tag { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
   color: var(--accent); background: var(--accent-light); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .ask-hint { margin: 4px 0 10px; color: var(--muted); font-size: .9rem; }
-.ask-row { display: flex; gap: 8px; }
+.ask-row { display: flex; gap: 8px; position: relative; }
+.ask-row .ask-suggest { left: 0; right: 0; top: 100%; max-height: 360px; overflow-y: auto; }
+.ask-row .ask-suggest button { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ask-row .ask-suggest .sugg-text { min-width: 0; overflow-wrap: anywhere; }
+.ask-row .ask-suggest .sugg-text b { color: var(--navy); }
+.ask-row .ask-suggest .sugg-sub { display: block; color: var(--muted); font-size: .82rem; margin-top: 2px; }
+.ask-row .ask-suggest .kind { flex: none; white-space: nowrap; }
+@media (max-width: 480px) {
+  .ask-row .ask-suggest button { flex-direction: column; gap: 2px; }
+  .ask-row .ask-suggest .kind { margin-left: 0; }
+}
 .ask-row input {
   flex: 1; min-width: 0; font-size: 1.05rem; padding: 12px 14px;
   border: 2px solid var(--accent); border-radius: 10px; outline: none; background: #fbfefd;
