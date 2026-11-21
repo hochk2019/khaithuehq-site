@@ -587,6 +587,350 @@ function highlight(text, tokens) {
   return out + esc(raw.slice(pos));
 }
 
+/* ================= Hỏi bằng tiếng Việt tự nhiên ================= */
+/* Chạy hoàn toàn trên trình duyệt: tách câu hỏi thành từ khóa mặt hàng /
+   chất liệu / công dụng, mở rộng bằng từ đồng nghĩa, chấm điểm kiểu BM25
+   với tên hàng, mô tả, kết quả phân loại và trích yếu của từng văn bản.
+   Từ gõ có dấu được so đúng dấu ("tủ" khác "từ", "bông" khác "bóng");
+   gõ không dấu thì so dạng không dấu như ô tìm từ khóa. */
+
+/* Chữ thường NFC, bỏ dấu câu, đưa dấu kiểu cũ về kiểu mới (hoá → hóa,
+   thuỷ → thủy) để hai cách gõ khớp nhau. */
+function viKey(s) {
+  return String(s == null ? '' : s).normalize('NFC').toLowerCase()
+    .replace(/[^0-9a-z\u00c0-\u1ef9]+/g, ' ')
+    .normalize('NFD')
+    .replace(/(^|[^q])([ou])([aey])([\u0300\u0301\u0303\u0309\u0323])(?![a-z\u0300-\u036f])/g, '$1$2$4$3')
+    .normalize('NFC')
+    .replace(/\s+/g, ' ').trim();
+}
+function hasDia(s) { return norm(s) !== String(s).replace(/\s+/g, ' ').trim(); }
+
+/* Từ chức năng bỏ qua (có dấu) và dạng không dấu an toàn để bỏ. */
+var NL_STOP = ('tôi mình em anh chị bạn muốn cần hỏi tra cứu xin cho của và với các những ' +
+  'một mấy là gì nào thì có không được nhập xuất khẩu vào về này đó kia ấy ạ nhé nhỉ ' +
+  'à ơi vậy sao thế bao nhiêu mã số hs loại hàng thuộc khai báo nên đúng giúp hộ đang ' +
+  'sẽ đã rồi như hay hoặc theo trong ra lên khi nếu').split(' ');
+var NL_STOP_ASCII = ('toi minh em anh chi ban muon can hoi tra cuu xin cho cua va voi cac nhung ' +
+  'mot may la gi nao thi khong duoc nhap xuat khau vao ve nay kia ay a nhe nhi oi vay ' +
+  'sao the bao nhieu ma so hs loai hang khai nen dung giup ho dang se roi nhu hay hoac ' +
+  'theo trong ra len khi neu de').split(' ');
+/* Cụm đổi ngữ cảnh: sau cụm là công dụng hoặc chất liệu. */
+var NL_CUES = [
+  ['sử dụng cho', 'use'], ['sử dụng để', 'use'], ['sử dụng trong', 'use'],
+  ['dùng để', 'use'], ['dùng cho', 'use'], ['dùng làm', 'use'], ['dùng trong', 'use'],
+  ['để làm', 'use'], ['dành cho', 'use'], ['phục vụ', 'use'], ['làm', 'use'], ['dùng', 'use'],
+  ['làm từ', 'material'], ['làm bằng', 'material'], ['bằng', 'material'],
+  ['chất liệu', 'material'], ['thành phần', 'material'], ['pha', 'material'],
+  ['từ', 'material'], ['chứa', 'material'], ['gồm', 'material']
+];
+/* Từ đơn vẫn nhận khi gõ không dấu vì không lẫn nghĩa. */
+var NL_CUE_ASCII = ['làm', 'pha', 'dùng'];
+var NL_STOP_PHRASES = ['mã hs', 'mã số', 'là gì', 'nhập khẩu', 'xuất khẩu', 'hàng hóa',
+  'sản phẩm', 'mặt hàng', 'phân loại', 'áp mã', 'như thế nào', 'bao nhiêu', 'thế nào',
+  'tại sao', 'vì sao', 'loại nào'];
+var NL_MATERIAL = ('cotton bông polyester polyeste nylon nilon spandex elastane rayon visco viscose ' +
+  'len lụa sợi xơ filament thép inox sắt nhôm đồng kẽm thiếc niken titan gỗ tre nứa mây ' +
+  'nhựa pvc pe pp pet abs pu silicon silicone da giấy gốm sứ carbon cacbon composite ' +
+  'acrylic polyme polymer xốp thep nhom nhua').split(' ');
+var NL_MATERIAL_PHRASES = ['kim loại', 'hợp kim', 'cao su', 'thủy tinh', 'tơ tằm', 'thép không gỉ'];
+
+/* Nhóm đồng nghĩa (hai chiều). Chỉ mở rộng khớp, không đổi dữ liệu. */
+var NL_SYN_GROUPS = [
+  ['cotton', 'bông', 'sợi bông'], ['polyester', 'polyeste', 'filament polyester'],
+  ['nylon', 'nilon', 'polyamide'], ['spandex', 'elastane'],
+  ['dệt kim', 'knitted'], ['dệt thoi', 'woven'], ['không dệt', 'non woven'],
+  ['áo thun', 'áo phông', 't shirt'], ['quần áo', 'may mặc', 'trang phục'],
+  ['vải', 'fabric'], ['sofa', 'ghế sofa'],
+  ['inox', 'thép không gỉ', 'stainless'], ['sắt', 'thép'],
+  ['nhựa', 'plastic', 'polyme', 'polymer'], ['hạt nhựa', 'nhựa nguyên sinh'],
+  ['cao su', 'rubber'], ['gỗ', 'ván gỗ', 'wood'],
+  ['ô tô', 'xe hơi', 'xe ô tô', 'oto'], ['xe máy', 'xe gắn máy', 'motorcycle'],
+  ['phụ tùng', 'linh kiện', 'bộ phận'], ['điện thoại', 'smartphone'],
+  ['máy tính', 'laptop', 'computer'],
+  ['đồng hồ thông minh', 'smartwatch', 'thiết bị đeo tay thông minh'],
+  ['tai nghe', 'headphone', 'earphone'], ['đèn led', 'led'],
+  ['pin', 'battery', 'ắc quy'], ['dây điện', 'cáp điện', 'cable'], ['cảm biến', 'sensor'],
+  ['thực phẩm chức năng', 'thực phẩm bảo vệ sức khỏe', 'food supplement'],
+  ['canxi', 'calci', 'calcium'], ['sữa', 'milk'], ['whey', 'whey protein'],
+  ['hương liệu', 'flavour', 'flavor', 'chất tạo hương'],
+  ['thức ăn chăn nuôi', 'thức ăn gia súc', 'thức ăn bổ sung'],
+  ['phân bón', 'fertilizer'], ['hóa chất', 'chemical'],
+  ['mỹ phẩm', 'cosmetic', 'chăm sóc da'], ['thuốc', 'dược phẩm'],
+  ['cà phê', 'coffee'], ['bột', 'powder', 'dạng bột'], ['máy chiếu', 'projector'],
+  ['màn hình', 'display', 'monitor'], ['áp suất', 'áp lực']
+];
+var NL_SYN = {};
+NL_SYN_GROUPS.forEach(function (g) {
+  g.forEach(function (t) {
+    var k = norm(t);
+    NL_SYN[k] = (NL_SYN[k] || []).concat(g.filter(function (x) { return x !== t; }));
+  });
+});
+
+var NL_CAT_LABEL = { goods: 'mặt hàng', material: 'chất liệu', use: 'công dụng' };
+var NL_CAT_WEIGHT = { goods: 1.25, material: 1, use: 0.8 };
+var NL_FIELD_WEIGHT = { p: 3, r: 1.4, b: 1.2, s: 0.8 };
+var NL_FIELD_LABEL = { p: 'tên hàng', r: 'kết quả phân loại', b: 'mô tả', s: 'trích yếu' };
+var NL_DISCLAIMER = 'Kết quả chỉ mang tính tham khảo, dựa trên các văn bản trong kho; ' +
+  'không thay thế quyết định phân loại của cơ quan hải quan.';
+
+/* Tách câu hỏi thành đơn vị nội dung {raw, n, cat, seg, pos, words}. */
+function parseQuestion(text) {
+  var toks = viKey(text).split(' ').filter(Boolean).map(function (r) {
+    return { raw: r, n: norm(r) };
+  });
+  var units = [], hsQ = [], cat = 'goods', seg = 0, i = 0;
+  function joinN(a, len) {
+    return toks.slice(a, a + len).map(function (t) { return t.n; }).join(' ');
+  }
+  /* Cụm nhiều từ so được cả dạng không dấu; từ đơn phải đúng dấu
+     (gõ "từ" mới là chất liệu, "tủ" thì không). */
+  function matchList(list, at) {
+    for (var k = 0; k < list.length; k++) {
+      var words = (typeof list[k] === 'string' ? list[k] : list[k][0]).split(' ');
+      if (at + words.length > toks.length) continue;
+      var ok = words.every(function (w, j) {
+        var t = toks[at + j];
+        return t.raw === w || ((words.length > 1 || NL_CUE_ASCII.indexOf(w) !== -1) &&
+          t.raw === t.n && t.n === norm(w));
+      });
+      if (ok) return { len: words.length, item: list[k] };
+    }
+    return null;
+  }
+  function byLen(a, b) {
+    return (typeof b === 'string' ? b : b[0]).split(' ').length -
+      (typeof a === 'string' ? a : a[0]).split(' ').length;
+  }
+  var cues = NL_CUES.slice().sort(byLen), stopPh = NL_STOP_PHRASES.slice().sort(byLen);
+  while (i < toks.length) {
+    var t = toks[i];
+    if (/^\d{4,8}$/.test(t.n)) { hsQ.push(t.n); i++; seg++; continue; }
+    var L = 0;
+    for (var l = 4; l >= 2; l--) {
+      if (i + l <= toks.length && NL_SYN[joinN(i, l)]) { L = l; break; }
+    }
+    if (!L) {
+      var cue = matchList(cues, i);
+      if (cue) { cat = cue.item[1]; i += cue.len; seg++; continue; }
+      var sp = matchList(stopPh, i);
+      if (sp) { i += sp.len; seg++; continue; }
+      if (NL_STOP.indexOf(t.raw) !== -1 || (t.raw === t.n && NL_STOP_ASCII.indexOf(t.n) !== -1) ||
+          t.n.length < 2) { i++; seg++; continue; }
+      L = 1;
+    }
+    var raw = toks.slice(i, i + L).map(function (x) { return x.raw; }).join(' ');
+    units.push({ raw: raw, n: joinN(i, L), words: L, seg: seg, pos: i,
+      cat: NL_MATERIAL.indexOf(raw) !== -1 || NL_MATERIAL_PHRASES.indexOf(raw) !== -1 ? 'material' : cat });
+    i += L;
+  }
+  return { units: units, hs: hsQ };
+}
+
+/* Chỉ mục riêng cho hỏi đáp (dạng không dấu + dạng có dấu), dựng khi cần. */
+var _nlIdx = null, _nlDf = {};
+function nlParts(pt) {
+  var keep = [], res = [], inRes = false;
+  String(pt || '').split('\n').forEach(function (line) {
+    var l = line.trim();
+    if (!l) return;
+    if (/^3\.\s*Kết quả/.test(l)) inRes = true;
+    else if (/^(🔗|#|🏷️|⚠️|📌 Lưu ý|Số:|Cơ quan:|Đơn đề nghị|• NSX|• Nhà sản xuất|• Tờ khai|• Đơn vị XNK|Đơn vị XNK|Số KQPT|Số phiếu)/.test(l)) {
+      inRes = false; return;
+    } else if (/^[12]\.\s/.test(l)) inRes = false;
+    (inRes ? res : keep).push(l);
+  });
+  return { b: keep.join(' '), r: res.join(' ') };
+}
+function nlIndex() {
+  if (_nlIdx) return _nlIdx;
+  _nlDf = {};
+  _nlIdx = DOCS.map(function (d) {
+    var parts = nlParts(d.post_text), x = {};
+    var src = { p: d.mat_hang, r: parts.r, b: parts.b, s: d.trich_yeu };
+    Object.keys(src).forEach(function (f) {
+      var k = viKey(src[f]);
+      x[f + 'd'] = ' ' + k + ' ';
+      x[f] = ' ' + norm(k) + ' ';
+    });
+    var head = x.pd.split(' ').slice(0, 13).join(' ') + ' ';
+    x.headd = head; x.head = ' ' + norm(head) + ' ';
+    x.cancel = /^\s*h[uủ]y\b/i.test(String(d.trich_yeu || ''));
+    return x;
+  });
+  return _nlIdx;
+}
+/* Một thuật ngữ: {key, dia} — dia: so với dạng có dấu. */
+function nlTerm(s) { var k = viKey(s); return hasDia(k) ? { key: k, dia: true } : { key: norm(k), dia: false }; }
+function countIn(hay, key) {
+  var needle = ' ' + key + ' ', n = 0, from = 0, idx;
+  while ((idx = hay.indexOf(needle, from)) !== -1) { n++; from = idx + needle.length - 1; if (n >= 3) break; }
+  return n;
+}
+function termInDoc(x, t) {
+  var best = 0, field = '', total = 0, sfx = t.dia ? 'd' : '';
+  ['p', 'r', 'b', 's'].forEach(function (f) {
+    var tf = countIn(x[f + sfx], t.key);
+    if (!tf) return;
+    var s = NL_FIELD_WEIGHT[f] * (tf / (tf + 0.6));
+    total += s;
+    if (s > best) { best = s; field = f; }
+  });
+  return { score: best + 0.25 * (total - best), field: field,
+    head: field === 'p' && x['head' + sfx].indexOf(' ' + t.key + ' ') !== -1 };
+}
+function nlIdf(t) {
+  var ck = (t.dia ? 'd:' : 'n:') + t.key;
+  if (_nlDf[ck]) return _nlDf[ck];
+  var idx = nlIndex(), df = 0, N = idx.length;
+  for (var i = 0; i < N; i++) {
+    if (termInDoc(idx[i], t).score) df++;
+  }
+  _nlDf[ck] = { df: df, idf: Math.log(1 + (N - df + 0.5) / (df + 0.5)) };
+  return _nlDf[ck];
+}
+
+/* Biến thể của một đơn vị: chính nó, dạng không dấu (khi gõ dấu sai),
+   sửa lỗi gõ, đồng nghĩa. Mỗi biến thể {t, w, show}. */
+function nlVariants(u, v) {
+  var vars = [], self = nlTerm(u.raw);
+  vars.push({ t: self, w: 1, show: '' });
+  if (self.dia) vars.push({ t: { key: u.n, dia: false }, w: 0.85, show: '' });
+  if (u.words === 1 && u.n.length >= 4 && !nlIdf({ key: u.n, dia: false }).df) {
+    var fix = correctToken(u.n, v);
+    if (fix) vars.push({ t: { key: fix, dia: false }, w: 0.8, show: fix });
+  }
+  (NL_SYN[u.n] || []).forEach(function (s) { vars.push({ t: nlTerm(s), w: 0.7, show: s }); });
+  return vars.filter(function (vv) { vv.stat = nlIdf(vv.t); return vv.stat.df > 0; });
+}
+
+/* Hỏi đáp: {parsed, concepts, results[], hsList[], keywords, weak}. */
+function askDocs(question, opts) {
+  opts = opts || {};
+  var limit = opts.limit || 5;
+  var parsed = parseQuestion(question);
+  var idx = nlIndex(), v = vocab(), N = idx.length;
+  var maxIdf = Math.log(1 + (N - 0.5) / 1.5);
+  /* Ghép 2 từ đơn liền nhau thành một khái niệm khi kho có đúng cụm đó
+     ("tủ lạnh", "hữu cơ", "gia súc"); từng từ đơn vẫn được tính một phần. */
+  var concepts = [], us = parsed.units, k = 0;
+  while (k < us.length) {
+    var a = us[k], b = us[k + 1];
+    if (b && a.words === 1 && b.words === 1 && a.seg === b.seg && b.pos === a.pos + 1) {
+      var pair = { raw: a.raw + ' ' + b.raw, n: a.n + ' ' + b.n, words: 2, cat: a.cat === 'material' || b.cat === 'material' ? 'material' : a.cat };
+      var pv = nlVariants(pair, v);
+      var known = function (u) { return NL_SYN[u.n] || NL_MATERIAL.indexOf(u.raw) !== -1; };
+      if (pv.length || (!known(a) && !known(b))) {
+        [a, b].forEach(function (u) {
+          nlVariants(u, v).forEach(function (vv) { vv.w *= 0.4; vv.part = u.raw; pv.push(vv); });
+        });
+        pair.vars = pv; concepts.push(pair); k += 2; continue;
+      }
+    }
+    a.vars = nlVariants(a, v); concepts.push(a); k++;
+  }
+  var seen = {};
+  concepts = concepts.filter(function (c) { if (seen[c.n]) return false; seen[c.n] = true; return true; });
+  concepts.forEach(function (c) {
+    c.idf = c.vars.length ? Math.max.apply(null, c.vars.map(function (vv) { return vv.stat.idf; })) : maxIdf * 0.6;
+    c.weight = c.idf * NL_CAT_WEIGHT[c.cat] * (c.words > 1 ? 1.3 : 1);
+  });
+  var totalW = concepts.reduce(function (s, c) { return s + c.weight; }, 0);
+  var keywords = concepts.map(function (c) { return c.raw; }).join(' ');
+  var base = { parsed: parsed, concepts: concepts, keywords: keywords, results: [], hsList: [], weak: true };
+  if (!concepts.length && !parsed.hs.length) return base;
+
+  var out = [];
+  for (var i = 0; i < DOCS.length; i++) {
+    var d = DOCS[i], x = idx[i];
+    if (!d.ma_hs) continue;
+    var score = 0, got = 0, matched = [], missing = [], head = false;
+    concepts.forEach(function (c) {
+      var best = null;
+      c.vars.forEach(function (vv) {
+        var r = termInDoc(x, vv.t);
+        if (!r.score) return;
+        var s = r.score * vv.w * vv.stat.idf * (r.head ? 1.2 : 1);
+        if (!best || s > best.s) best = { s: s, r: r, vv: vv };
+      });
+      if (!best) { missing.push(c); return; }
+      score += best.s * NL_CAT_WEIGHT[c.cat];
+      got += c.weight * Math.min(1, best.vv.w) * (best.r.field === 'p' || best.r.field === 'r' ? 1 : 0.8);
+      matched.push({ c: c, field: best.r.field, show: best.vv.part ? '' : best.vv.show, part: best.vv.part || '' });
+      if (best.r.head && c.cat !== 'use' && !best.vv.part) head = true;
+    });
+    var hsD = hsDigits(d.ma_hs);
+    parsed.hs.forEach(function (h) {
+      if (hsD.indexOf(h) === 0) { score += 12; got += totalW ? totalW * 0.25 : 1; }
+    });
+    if (!score) continue;
+    var coverage = totalW ? Math.min(1, got / totalW) : 0.5;
+    if (x.cancel) score *= 0.5;
+    out.push({ doc: d, i: i, score: score * (0.5 + coverage), coverage: coverage,
+      matched: matched, missing: missing, head: head, cancel: x.cancel });
+  }
+  out.sort(function (a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return IDX[b.i].dateSort - IDX[a.i].dateSort;
+  });
+  var top = out[0];
+  out.forEach(function (r) {
+    var lvl = r.coverage >= 0.75 && r.head ? 3 : r.coverage >= 0.5 ? 2 : 1;
+    if (top && lvl === 3 && r.score < top.score * 0.55) lvl = 2;
+    if (r.cancel && lvl > 1) lvl--;
+    r.level = lvl;
+    r.confidence = lvl === 3 ? 'Cao' : lvl === 2 ? 'Trung bình' : 'Thấp';
+  });
+  base.weak = !top || top.coverage < 0.45;
+  if (base.weak) return base;
+  /* Tối đa 3 văn bản cùng một mã HS để còn chỗ cho mã thay thế. */
+  var good = out.filter(function (r) { return r.coverage >= 0.4; });
+  var picked = [], perHs = {}, rest = [];
+  good.forEach(function (r) {
+    if (picked.length >= limit) return;
+    if ((perHs[r.doc.ma_hs] || 0) >= 3) { rest.push(r); return; }
+    perHs[r.doc.ma_hs] = (perHs[r.doc.ma_hs] || 0) + 1;
+    picked.push(r);
+  });
+  while (picked.length < limit && rest.length) picked.push(rest.shift());
+  picked.sort(function (a, b) { return b.score - a.score; });
+  var hsMap = {}, hsList = [];
+  good.slice(0, 10).forEach(function (r) {
+    var h = r.doc.ma_hs;
+    if (!hsMap[h]) { hsMap[h] = { hs: h, count: 0, level: 0, score: 0 }; hsList.push(hsMap[h]); }
+    hsMap[h].count++;
+    hsMap[h].level = Math.max(hsMap[h].level, r.level);
+    hsMap[h].score += r.score;
+  });
+  hsList.sort(function (a, b) { return b.score - a.score; });
+  base.results = picked; base.hsList = hsList.slice(0, 3);
+  return base;
+}
+
+/* Lý do ngắn gọn cho một kết quả hỏi đáp. */
+function askReason(r) {
+  var parts = { goods: [], material: [], use: [] }, where = [];
+  r.matched.forEach(function (m) {
+    var label = m.part ? m.part : m.c.raw + (m.show && norm(m.show) !== m.c.n ? ' (≈ ' + m.show + ')' : '');
+    parts[m.c.cat].push(label);
+    var w = NL_FIELD_LABEL[m.field];
+    if (where.indexOf(w) === -1) where.push(w);
+  });
+  var segs = [];
+  ['goods', 'material', 'use'].forEach(function (k) {
+    if (parts[k].length) segs.push(NL_CAT_LABEL[k] + ' ' + parts[k].join(', '));
+  });
+  var s = segs.length ? 'Trùng ' + segs.join('; ') : 'Trùng mã HS trong câu hỏi';
+  if (where.length) s += ' (trong ' + where.join(', ') + ')';
+  s += '.';
+  var miss = r.missing.map(function (c) { return c.raw; });
+  r.matched.forEach(function (m) { if (m.part) miss.push(m.c.raw); });
+  if (miss.length) s += ' Chưa khớp: ' + miss.join(', ') + '.';
+  if (r.cancel) s += ' Lưu ý: đây là văn bản hủy một thông báo trước đó.';
+  return s;
+}
+
 /* Cho phép kiểm thử bằng Node: VBXNK.searchDocs(...) */
 if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
@@ -597,10 +941,12 @@ if (typeof globalThis !== 'undefined') {
     recordRecent: recordRecent, recents: recents,
     parseDocDetail: parseDocDetail, relatedDocs: relatedDocs,
     extractDriveId: extractDriveId, highlight: highlight,
+    viKey: viKey, parseQuestion: parseQuestion, askDocs: askDocs, askReason: askReason,
+    NL_DISCLAIMER: NL_DISCLAIMER,
     _pdfBlockHtml: pdfBlockHtml, _renderDetail: renderDetail,
     _setData: function (docs, drive, meta, img) {
       DOCS = docs; DRIVE = drive || {}; META = meta || {}; IMG = img || {};
-      _suggestPool = null; _vocab = null; _recents = null; _clicks = null;
+      _suggestPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {};
       buildIndex(docs);
     }
   };
@@ -926,6 +1272,7 @@ function updateMeta(doc) {
 function route() {
   var h = location.hash || '#/';
   var m = /^#\/bai\/(\d+)/.exec(h);
+  document.body.classList.toggle('is-detail', !!m);
   if (m) { renderDetail(m[1]); return; }
   var c = /^#\/chuong\/([0-9]{2}|khong-co-ma)/.exec(h);
   if (c) {
@@ -1068,6 +1415,95 @@ function syncQueryToUrl() {
   } catch (e) { /* trình duyệt quá cũ: bỏ qua */ }
 }
 
+/* Khối trả lời "Hỏi bằng tiếng Việt tự nhiên". */
+function confClass(level) { return level === 3 ? 'conf-high' : level === 2 ? 'conf-mid' : 'conf-low'; }
+function askResultHtml(r, n) {
+  var d = r.doc;
+  var links = '<a class="btn" href="#/bai/' + d.ma + '">Xem văn bản</a>';
+  if (d.pdf_url) {
+    links += '<a class="btn ghost" href="' + esc(d.pdf_url) + '" target="_blank" rel="noopener">PDF gốc</a>';
+  } else if (d.detail_url) {
+    links += '<a class="btn ghost" href="' + esc(d.detail_url) + '" target="_blank" rel="noopener">Nguồn customs.gov.vn</a>';
+  }
+  return '<li class="ask-item">' +
+    '<div class="ask-item-head"><span class="ask-rank">' + n + '</span>' +
+    '<span class="ask-hs">' + esc(d.ma_hs) + '</span>' +
+    '<span class="conf ' + confClass(r.level) + '">Tin cậy: ' + r.confidence + '</span></div>' +
+    '<p class="ask-goods">' + esc(shortText(d.mat_hang || d.trich_yeu, 180)) + '</p>' +
+    '<p class="ask-cite">Nguồn: <a href="#/bai/' + d.ma + '"><b>' + esc(d.so_hieu) + '</b></a> · ' +
+      esc(d.ngay || '') + ' · ' + esc(LOAI_LABEL[d.loai] || 'Văn bản') + '</p>' +
+    '<p class="ask-why"><b>Lý do:</b> ' + esc(askReason(r)) + '</p>' +
+    '<div class="ask-links">' + links + '</div>' +
+    '</li>';
+}
+function renderAsk(question) {
+  var out = $('#askOut');
+  if (!out) return;
+  question = String(question || '').trim();
+  if (!question) { out.innerHTML = ''; return; }
+  var ans = askDocs(question);
+  var html = '<div class="ask-answer">';
+  if (ans.weak) {
+    html += '<p class="ask-fallback">Chưa tìm được văn bản đủ khớp với mô tả “' + esc(question) + '”. ' +
+      'Đã chuyển sang tìm kiếm từ khóa' + (ans.keywords ? ' với “<b>' + esc(ans.keywords) + '</b>”' : '') +
+      ' ở bên dưới. Bạn có thể mô tả rõ hơn tên hàng, chất liệu hoặc công dụng.</p>';
+  } else {
+    html += '<div class="ask-summary"><span>Mã HS gợi ý:</span>' + ans.hsList.map(function (h) {
+      return '<span class="ask-hs-pill ' + confClass(h.level) + '">' + esc(h.hs) +
+        ' <small>' + h.count + ' văn bản</small></span>';
+    }).join('') + '</div>';
+    var c = ans.concepts.filter(function (x) { return x.vars.length; });
+    if (c.length) {
+      html += '<p class="ask-parsed">Đã hiểu: ' + ['goods', 'material', 'use'].map(function (k) {
+        var xs = c.filter(function (x) { return x.cat === k; }).map(function (x) { return esc(x.raw); });
+        return xs.length ? '<span class="ask-kw">' + NL_CAT_LABEL[k] + ': <b>' + xs.join(', ') + '</b></span>' : '';
+      }).join('') + '</p>';
+    }
+    html += '<ol class="ask-list">' + ans.results.map(function (r, i) { return askResultHtml(r, i + 1); }).join('') + '</ol>';
+  }
+  html += '<p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p></div>';
+  out.innerHTML = html;
+  if (ans.weak) {
+    var q = $('#q');
+    if (q) q.value = ans.keywords || question;
+    commitSearch(ans.keywords || question);
+  }
+}
+function wireAsk() {
+  var form = $('#askForm'), input = $('#ask');
+  if (!form || !input) return;
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    renderAsk(input.value);
+    syncAskToUrl(input.value);
+  });
+  document.querySelectorAll('.ask-chip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      input.value = b.getAttribute('data-ask');
+      renderAsk(input.value);
+      syncAskToUrl(input.value);
+    });
+  });
+  $('#askOut').addEventListener('click', function (e) {
+    var a = e.target.closest('a[href^="#/bai/"]');
+    if (!a) return;
+    var m = /^#\/bai\/(\d+)/.exec(a.getAttribute('href') || '');
+    if (m) recordClick(m[1]);
+  });
+  try {
+    var initial = new URLSearchParams(location.search).get('hoi');
+    if (initial) { input.value = initial; renderAsk(initial); }
+  } catch (e) { /* bỏ qua */ }
+}
+function syncAskToUrl(text) {
+  try {
+    var url = new URL(location.href);
+    if (text && text.trim()) url.searchParams.set('hoi', text.trim());
+    else url.searchParams.delete('hoi');
+    history.replaceState(null, '', url.pathname + url.search + location.hash);
+  } catch (e) { /* bỏ qua */ }
+}
+
 function boot() {
   Promise.all([
     fetch('data.json').then(function (r) { return r.json(); }),
@@ -1176,6 +1612,7 @@ function boot() {
 
     window.addEventListener('hashchange', route);
     route();
+    wireAsk();
   }).catch(function (err) {
     document.getElementById('view').innerHTML =
       '<p class="empty">Không tải được dữ liệu kho (data.json). ' +

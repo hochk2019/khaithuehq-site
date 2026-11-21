@@ -15,21 +15,40 @@
 </head>
 <body>
 <header class="site-header">
-  <div class="wrap">
+  <div class="wrap header-bar">
     <a class="brand" href="#/"><img class="brand-logo" src="logo.webp" alt="Logo Văn bản XNK">Văn bản XNK</a>
-    <p class="tagline">Kết quả phân tích phân loại &amp; xác định trước mã số hải quan</p>
-    <p class="meta-line"><b id="totalCount">…</b> văn bản · Cập nhật lần cuối: <span id="updatedAt">…</span></p>
-    <nav>
+    <nav aria-label="Điều hướng chính">
       <a href="#/">Mới nhất</a>
       <a href="#/chuong">Duyệt theo chương HS</a>
       <a href="https://www.facebook.com/tiepvanhoangkim1/" target="_blank" rel="noopener">Fanpage Văn bản XNK</a>
     </nav>
   </div>
+  <div class="wrap hero">
+    <p class="tagline">Kết quả phân tích phân loại &amp; xác định trước mã số hải quan</p>
+    <p class="meta-line"><b id="totalCount">…</b> văn bản · Cập nhật lần cuối: <span id="updatedAt">…</span></p>
+  </div>
 </header>
 
 <main class="wrap">
+  <section class="ask-box" aria-labelledby="askLabel">
+    <form id="askForm" autocomplete="off">
+      <label id="askLabel" for="ask">Hỏi bằng tiếng Việt tự nhiên <span class="ask-tag">Thử nghiệm</span></label>
+      <p class="ask-hint">Mô tả hàng hóa như khi nói chuyện: tên hàng, chất liệu, công dụng. Hệ thống tìm các văn bản gần nhất trong kho và gợi ý mã HS kèm nguồn.</p>
+      <div class="ask-row">
+        <input id="ask" type="text" placeholder="Ví dụ: vải dệt kim cotton pha polyester làm áo thun" >
+        <button type="submit" class="ask-btn">Hỏi</button>
+      </div>
+      <div class="chips ask-chips">
+        <span>Thử hỏi:</span>
+        <button type="button" class="ask-chip" data-ask="vải dệt thoi polyester bọc sofa">vải dệt thoi polyester bọc sofa</button>
+        <button type="button" class="ask-chip" data-ask="cảm biến áp suất dầu cho ô tô">cảm biến áp suất dầu cho ô tô</button>
+        <button type="button" class="ask-chip" data-ask="thực phẩm chức năng bổ sung canxi vitamin D3">thực phẩm bổ sung canxi</button>
+      </div>
+    </form>
+    <div id="askOut" class="ask-out" aria-live="polite"></div>
+  </section>
   <section class="search-box" aria-label="Tìm kiếm">
-    <label for="q">Tìm kiếm văn bản</label>
+    <label for="q">Tìm theo từ khóa, số hiệu hoặc mã HS</label>
     <input id="q" type="search" placeholder="Ví dụ: vải sofa, thép tròn, 3504, 1397, whey protein…" autocomplete="off" aria-describedby="resultInfo" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
     <div id="suggest" class="suggest" role="listbox" hidden></div>
     <p id="suggestStatus" class="sr-only" aria-live="polite"></p>
