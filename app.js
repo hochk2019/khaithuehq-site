@@ -673,7 +673,7 @@ function askSuggest(text) {
   phraseMatches(words, false).forEach(push);
   /* Không có cụm nào khớp tiền tố: sửa từ cuối theo từ gần giống trong kho. */
   var nl = norm(lastRaw);
-  if (!out.length && nl.length >= 3 && !/\d/.test(nl)) {
+  if (!out.length && nl.length >= 3 && !/\d/.test(nl) && !pool.map[nl]) {
     var md = nl.length >= 7 ? 2 : 1, fixes = [];
     /* Từ cuối đã gõ có dấu thì so cả dấu ("suất" không thành "sữa"). */
     var vl = viKey(lastRaw), useDia = vl !== nl;
