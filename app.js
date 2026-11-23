@@ -2281,7 +2281,7 @@ function seenSet() {
   return _seen;
 }
 function markSeen(docs) {
-  _seen = null;
+  if (lsGet(SEEN_KEY) != null) _seen = null;
   var st = seenSet(), changed = false;
   docs.forEach(function (d) { if (!st[d.ma]) { st[d.ma] = 1; changed = true; } });
   if (changed) saveSeen();
@@ -2300,7 +2300,7 @@ function totalNew() {
 }
 /* Bắt đầu theo dõi thì coi các văn bản hiện có của mã đó là đã xem: chỉ báo văn bản về sau. */
 function toggleFollow(k, on) {
-  _follows = null;
+  if (lsGet(FOLLOW_KEY) != null) _follows = null;
   var fs = follows(), i = fs.indexOf(k);
   if (on === undefined) on = i === -1;
   if (on && i === -1) {
