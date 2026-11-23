@@ -1597,13 +1597,6 @@ function isExactIdHit(r) {
   return !!q && norm(d.so_hieu) === norm(q);
 }
 function wireResultButtons() {
-  document.querySelectorAll('#view .ask-switch').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var t = ($('#q') && $('#q').value.trim()) || state.query;
-      runLookup(t, { mode: 'ask' });
-      window.scrollTo(0, 0);
-    });
-  });
   document.querySelectorAll('#view .dym-btn, #view .rel-chip').forEach(function (b) {
     b.addEventListener('click', function () {
       var q = $('#q');
@@ -1640,9 +1633,6 @@ function renderList() {
       pre += '<h2 class="list-head">Kết quả khớp từ khóa' +
         (state.query.trim() ? ' “' + esc(state.query.trim()) + '”' : '') + '</h2>';
     }
-  } else if (state.query && looksLikeDescription(state.query)) {
-    pre += '<p class="mode-hint">Muốn hệ thống gợi ý mã HS từ mô tả? Bấm ' +
-      '<button type="button" class="ask-switch">Hỏi tự nhiên</button></p>';
   }
   if (!results.length) {
     view.innerHTML = pre + (asking && !state.askWeak
@@ -2617,7 +2607,8 @@ function detectMode(text) {
 }
 function looksLikeDescription(text) {
   var m = detectMode(text);
-  return m === 'ask' || (m === 'keyword' && String(text).trim().split(/\s+/).length >= 3);
+  return m === 'ask' || (m === 'keyword' &&
+    String(text).trim().split(/\s+/).filter(function (w) { return norm(w); }).length >= 3);
 }
 function clearAsk() {
   state.mode = 'keyword'; state.askText = ''; state.askWeak = false; state.forced = false;
@@ -2636,7 +2627,7 @@ function runLookup(text, opts) {
   opts = opts || {};
   clearTimeout(_inputDeb);
   var t = String(text == null ? '' : text).trim();
-  var auto = detectMode(t), autoMode = auto === 'ask' ? 'ask' : 'keyword';
+  var auto = detectMode(t), autoMode = looksLikeDescription(t) ? 'ask' : 'keyword';
   var mode = t ? (opts.mode || autoMode) : 'keyword';
   state.auto = auto; state.forced = !!opts.mode && !!t && opts.mode !== autoMode;
   state.mode = mode; state.shown = PAGE_SIZE; state.branch = null;
@@ -2866,6 +2857,9 @@ function boot() {
     window.addEventListener('hashchange', route);
     route();
     if (initialHoi) runLookup(initialHoi, { mode: 'ask', restore: true });
+    else if (initialQ && looksLikeDescription(initialQ) && !/^#\/(chuong|nhanh)\//.test(location.hash)) {
+      runLookup(initialQ, { restore: true });
+    }
    
   }).catch(function (err) {
     document.getElementById('view').innerHTML =

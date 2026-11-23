@@ -364,10 +364,6 @@ mark { background: #ffe08a; padding: 0 2px; border-radius: 3px; }
 .ask-filter-note { margin: 10px 0 0; font-size: .82rem; color: var(--muted); }
 .list-tools { margin: 0 0 12px; }
 .list-head { margin: 6px 0 10px; font-size: 1.05rem; color: var(--navy); }
-.mode-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--accent-light);
-  color: #08583f; font-size: .9rem; }
-.mode-hint button { border: 0; background: none; color: var(--accent); font-weight: 700; text-decoration: underline;
-  cursor: pointer; padding: 0; font-size: inherit; }
 .branch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 10px 12px;
   border-radius: 10px; background: var(--hs-bg); font-size: .9rem; }
 .branch-bar b { color: var(--hs); }
