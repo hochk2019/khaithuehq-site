@@ -1658,7 +1658,7 @@ function renderList() {
   var shown = results.slice(0, state.shown);
   if (!asking && !state.branch && detectMode(state.query) === 'code') {
     var exact = shown.filter(isExactIdHit), rest = shown.filter(function (r) { return !isExactIdHit(r); });
-    if (exact.length) html += '<h2 class="list-head">Khớp số hiệu / mã HS</h2>' + exact.map(cardHtml).join('');
+    if (exact.length) html += '<h2 class="list-head">Khớp chính xác số hiệu / mã HS</h2>' + exact.map(cardHtml).join('');
     if (rest.length) html += (exact.length ? '<h2 class="list-head">Kết quả khớp từ khóa</h2>' : '') + rest.map(cardHtml).join('');
   } else {
     html += shown.map(cardHtml).join('');
