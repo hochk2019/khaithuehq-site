@@ -2877,6 +2877,8 @@ function wireNav() {
     header.classList.toggle('nav-open', open);
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     btn.setAttribute('aria-label', open ? 'Đóng menu' : 'Mở menu');
+    var f = document.activeElement;
+    if (!open && f && header.contains(f) && f !== btn && !f.offsetParent && btn.offsetParent) btn.focus();
   }
   btn.addEventListener('click', function () { setOpen(!header.classList.contains('nav-open')); });
   document.getElementById('mainNav').addEventListener('click', function (e) {
