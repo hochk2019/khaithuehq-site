@@ -2440,6 +2440,7 @@ function route() {
   var pb = /^#\/phan-biet(?:\/(\d+)-(\d+))?/.exec(h);
   var tree = /^#\/(cay-hs|thong-ke)\/?$/.test(h), fd = /^#\/theo-doi\/?$/.test(h);
   document.body.classList.toggle('is-detail', !!m || !!pb || tree || fd);
+  if (m || pb || tree || fd || h === '#/chuong') hideAskForPage();
   if (m) { renderDetail(m[1]); return; }
   if (pb) { if (pb[1]) renderCompare(pb[1], pb[2]); else renderCompareList(); return; }
   if (tree) { renderTreePage(h.indexOf('thong-ke') !== -1); return; }
@@ -2485,7 +2486,18 @@ function route() {
   if (h === '#/chuong') { renderChapters(); return; }
   state.chapter = '';
   syncFilterControls();
+  if (_askHidden) {
+    _askHidden = false;
+    var hoi = new URLSearchParams(location.search).get('hoi');
+    if (hoi) { runLookup(hoi, { mode: 'ask', restore: true }); return; }
+  }
   renderList();
+}
+/* Trang riêng không hiện thẻ Hỏi; quay về danh sách khi URL còn ?hoi= thì dựng lại thẻ. */
+var _askHidden = false;
+function hideAskForPage() {
+  if (state.askText) _askHidden = true;
+  clearAsk();
 }
 
 function syncFilterControls() {
@@ -2624,7 +2636,7 @@ function askListQuery(kw) {
   return ws.join(' ');
 }
 function runLookup(text, opts) {
-  opts = opts || {};
+  opts = opts || {}; _askHidden = false;
   clearTimeout(_inputDeb);
   var t = String(text == null ? '' : text).trim();
   var auto = detectMode(t), autoMode = looksLikeDescription(t) ? 'ask' : 'keyword';
@@ -2643,29 +2655,36 @@ function runLookup(text, opts) {
   }
   if (t) recordRecent(t);
   if (auto === 'code' && isFollowed(hsDigits(t))) { markSeen(followDocs(hsDigits(t))); updateFollowBadge(); }
-  syncQueryToUrl();
- 
   var onPage = onPageRoute() || /^#\/nhanh\//.test(location.hash);
-  if (opts.restore && onPage) return;
-  if (onPage) location.hash = '#/';
-  else renderList();
+  if (opts.restore && onPage) { syncQueryToUrl(); return; }
+  if (!opts.restore && lookupLeavesPage()) { goHomeWithQuery(); return; }
+  syncQueryToUrl();
+  renderList();
 }
 /* Chốt một truy vấn từ khóa (nút "Ý bạn là", tìm kiếm liên quan). */
 /* Trang riêng (bài viết, so sánh, cây HS): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
 function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke|theo-doi)/.test(location.hash); }
+/* Tra cứu từ các trang này (cả mục lục chương) mở trang chủ ở mục lịch sử mới, để Back về đúng trang cũ. */
+function lookupLeavesPage() { return onPageRoute() || /^#\/(nhanh\/|chuong\/?$)/.test(location.hash); }
+function goHomeWithQuery() { syncQueryToUrl('#/'); window.dispatchEvent(new HashChangeEvent('hashchange')); }
+function rememberFilters(f) {
+  try { history.replaceState({ filters: f || { loai: state.loai, chapter: state.chapter, year: state.year } }, ''); } catch (e) { /* bỏ qua */ }
+}
 function commitSearch(text) {
   runLookup(text, { mode: 'keyword' });
 }
 /* Đưa truy vấn vào URL để link chia sẻ được, nút Back hoạt động và Cloudflare
    Web Analytics (không cookie) ghi lại truy vấn thật: ?q= cho từ khóa,
    ?hoi= cho câu hỏi tự nhiên (giữ tương thích link cũ của cả hai ô). */
-function syncQueryToUrl() {
+function syncQueryToUrl(hash) {
   try {
     var url = new URL(location.href);
     url.searchParams.delete('q'); url.searchParams.delete('hoi');
     if (state.mode === 'ask' && state.askText) url.searchParams.set('hoi', state.askText);
     else if (state.query && state.query.trim()) url.searchParams.set('q', state.query.trim());
-    history.replaceState(null, '', url.pathname + url.search + location.hash);
+    var next = url.pathname + url.search + (hash || location.hash);
+    if (hash && hash !== location.hash) history.pushState(null, '', next);
+    else history.replaceState(history.state, '', next);
   } catch (e) { /* trình duyệt quá cũ: bỏ qua */ }
 }
 
@@ -2757,9 +2776,9 @@ function boot() {
         if (detectMode(v) === 'ask') return;
         clearAsk();
         state.auto = detectMode(v); state.query = v; state.shown = PAGE_SIZE; state.branch = null;
+        if (lookupLeavesPage()) { goHomeWithQuery(); return; }
         syncQueryToUrl();
-        if (onPageRoute() || /^#\/nhanh\//.test(location.hash)) location.hash = '#/';
-        else renderList();
+        renderList();
       }, 150);
     });
     /* Dựng sẵn bộ gợi ý khi người dùng chạm vào ô, không làm chậm lần tải trang. */
@@ -2817,8 +2836,10 @@ function boot() {
       if (state.query) recordRecent(state.query);
     });
     /* Nút Back/Forward của trình duyệt: khôi phục truy vấn từ URL. */
-    window.addEventListener('popstate', function () {
+    window.addEventListener('popstate', function (e) {
       try {
+        var sf = e.state && e.state.filters;
+        if (sf) { state.loai = sf.loai; state.chapter = sf.chapter; state.year = sf.year; syncFilterControls(); }
         var sp2 = new URLSearchParams(location.search);
         var ph = sp2.get('hoi') || '', pq = sp2.get('q') || '';
         if (ph) {
@@ -2836,13 +2857,13 @@ function boot() {
       });
     });
     $('#fLoai').addEventListener('change', function (e) {
-      state.loai = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.loai = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#fChuong').addEventListener('change', function (e) {
-      state.chapter = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.chapter = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#fNam').addEventListener('change', function (e) {
-      state.year = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.year = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#clearFilters').addEventListener('click', function () {
       state.loai = ''; state.chapter = ''; state.year = ''; state.query = '';
@@ -2852,6 +2873,28 @@ function boot() {
       syncQueryToUrl();
       if (location.hash && location.hash !== '#/') location.hash = '#/';
       else renderList();
+    });
+
+    /* Logo và nút trên header: về đúng trang đích, bỏ tra cứu đang hiện.
+       pushState giữ ?q=/?hoi= ở mục lịch sử trước nên Back vẫn khôi phục tra cứu. */
+    $('.site-header').addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="#/"]');
+      if (!a || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      var href = a.getAttribute('href');
+      var prevLoai = state.loai, prevChapter = state.chapter, prevYear = state.year;
+      clearTimeout(_inputDeb); hideSuggestions(); clearAsk();
+      state.query = ''; state.shown = PAGE_SIZE; state.branch = null; q.value = '';
+      if (href === '#/') { state.loai = ''; state.chapter = ''; state.year = ''; syncFilterControls(); }
+      var url = new URL(location.href);
+      url.searchParams.delete('q'); url.searchParams.delete('hoi');
+      url.hash = href;
+      var next = url.pathname + url.search + url.hash;
+      if (next !== location.pathname + location.search + location.hash) {
+        rememberFilters({ loai: prevLoai, chapter: prevChapter, year: prevYear });
+        history.pushState({ filters: { loai: state.loai, chapter: state.chapter, year: state.year } }, '', next);
+      }
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
 
     window.addEventListener('hashchange', route);
