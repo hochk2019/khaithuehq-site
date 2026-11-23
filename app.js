@@ -2301,7 +2301,12 @@ function totalNew() {
 function toggleFollow(k, on) {
   var fs = follows(), i = fs.indexOf(k);
   if (on === undefined) on = i === -1;
-  if (on && i === -1) { fs.push(k); markSeen(followDocs(k)); }
+  if (on && i === -1) {
+    markSeen(followDocs(k).filter(function (d) {
+      return !fs.some(function (f) { return followMatch(f, d.ma_hs); });
+    }));
+    fs.push(k);
+  }
   else if (!on && i !== -1) fs.splice(i, 1);
   lsSet(FOLLOW_KEY, JSON.stringify(fs));
   return on;
