@@ -2482,7 +2482,7 @@ function route() {
     renderList();
     return;
   }
-  if (h === '#/chuong') { renderChapters(); return; }
+  if (h === '#/chuong') { if (state.query || state.askText) renderList(); else renderChapters(); return; }
   state.chapter = '';
   syncFilterControls();
   renderList();
