@@ -2265,7 +2265,7 @@ function route() {
   if (c) {
     clearAsk(); updateModeUi();
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
-    state.query = ''; syncQueryToUrl();
+    if (/[?&]hoi=/.test(location.search)) { state.query = ''; syncQueryToUrl(); }
     state.query = '';
     var q = $('#q'); if (q) q.value = '';
     if (c[1] === 'khong-co-ma') {
