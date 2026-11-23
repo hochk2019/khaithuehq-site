@@ -2857,7 +2857,9 @@ function boot() {
     window.addEventListener('hashchange', route);
     route();
     if (initialHoi) runLookup(initialHoi, { mode: 'ask', restore: true });
-    else if (initialQ && looksLikeDescription(initialQ)) runLookup(initialQ, { restore: true });
+    else if (initialQ && looksLikeDescription(initialQ) && !/^#\/(chuong|nhanh)\//.test(location.hash)) {
+      runLookup(initialQ, { restore: true });
+    }
    
   }).catch(function (err) {
     document.getElementById('view').innerHTML =
