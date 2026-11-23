@@ -2817,8 +2817,10 @@ function boot() {
       if (state.query) recordRecent(state.query);
     });
     /* Nút Back/Forward của trình duyệt: khôi phục truy vấn từ URL. */
-    window.addEventListener('popstate', function () {
+    window.addEventListener('popstate', function (e) {
       try {
+        var sf = e.state && e.state.filters;
+        if (sf) { state.loai = sf.loai; state.chapter = sf.chapter; state.year = sf.year; syncFilterControls(); }
         var sp2 = new URLSearchParams(location.search);
         var ph = sp2.get('hoi') || '', pq = sp2.get('q') || '';
         if (ph) {
@@ -2861,6 +2863,7 @@ function boot() {
       if (!a || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
       var href = a.getAttribute('href');
+      var prevLoai = state.loai, prevChapter = state.chapter, prevYear = state.year;
       clearTimeout(_inputDeb); hideSuggestions(); clearAsk();
       state.query = ''; state.shown = PAGE_SIZE; state.branch = null; q.value = '';
       if (href === '#/') { state.loai = ''; state.chapter = ''; state.year = ''; syncFilterControls(); }
@@ -2868,7 +2871,10 @@ function boot() {
       url.searchParams.delete('q'); url.searchParams.delete('hoi');
       url.hash = href;
       var next = url.pathname + url.search + url.hash;
-      if (next !== location.pathname + location.search + location.hash) history.pushState(null, '', next);
+      if (next !== location.pathname + location.search + location.hash) {
+        history.replaceState({ filters: { loai: prevLoai, chapter: prevChapter, year: prevYear } }, '');
+        history.pushState(null, '', next);
+      }
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
 
