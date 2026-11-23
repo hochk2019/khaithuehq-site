@@ -756,7 +756,7 @@ function askCooccur(words, endsSpace) {
       f.n++;
     });
   });
-  var headRaw = words.slice(0, endsSpace ? words.length : -1).join(' ');
+  var headRaw = ws.slice(0, endsSpace ? ws.length : -1).join(' ');
   return Object.keys(found).map(function (k) { return found[k]; })
     .sort(function (a, b) { return b.n - a.n || a.tail.length - b.tail.length; })
     .slice(0, 4).map(function (f) {
