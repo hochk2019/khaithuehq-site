@@ -2854,6 +2854,24 @@ function boot() {
       else renderList();
     });
 
+    /* Logo và nút trên header: về đúng trang đích, bỏ tra cứu đang hiện.
+       pushState giữ ?q=/?hoi= ở mục lịch sử trước nên Back vẫn khôi phục tra cứu. */
+    $('.site-header').addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="#/"]');
+      if (!a || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      var href = a.getAttribute('href');
+      clearTimeout(_inputDeb); hideSuggestions(); clearAsk();
+      state.query = ''; state.shown = PAGE_SIZE; state.branch = null; q.value = '';
+      if (href === '#/') { state.loai = ''; state.chapter = ''; state.year = ''; syncFilterControls(); }
+      var url = new URL(location.href);
+      url.searchParams.delete('q'); url.searchParams.delete('hoi');
+      url.hash = href;
+      var next = url.pathname + url.search + url.hash;
+      if (next !== location.pathname + location.search + location.hash) history.pushState(null, '', next);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
     window.addEventListener('hashchange', route);
     route();
     if (initialHoi) runLookup(initialHoi, { mode: 'ask', restore: true });
