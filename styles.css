@@ -358,11 +358,6 @@ mark { background: #ffe08a; padding: 0 2px; border-radius: 3px; }
 .lookup-box label { font-size: 1.12rem; font-weight: 800; color: var(--navy); }
 .lookup-sub { font-weight: 500; font-size: .92rem; color: var(--muted); }
 .lookup-box .ask-row input[type="search"] { width: auto; border-color: var(--accent); border-radius: 10px; }
-.mode-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 10px 0 2px; }
-.mode-btn { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px;
-  padding: 4px 12px; font-size: .84rem; cursor: pointer; }
-.mode-btn[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
-.mode-note { font-size: .8rem; color: var(--muted); min-width: 0; }
 .lookup-box .chips button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
 .ask-out .ask-answer { margin: 0 0 12px; border: 1px solid var(--line); border-top: 4px solid var(--accent);
   border-radius: var(--radius); background: var(--card); padding: 14px; box-shadow: var(--shadow); }

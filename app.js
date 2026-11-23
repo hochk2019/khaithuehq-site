@@ -1585,9 +1585,14 @@ function zeroResultHtml() {
   return html;
 }
 
+/* Chỉ khi truy vấn bằng đúng toàn bộ số hiệu hoặc mã HS; tiền tố ("85", "3504") không tính. */
 function isExactIdHit(r) {
-  var x = r.reasons && r.reasons[0] || '';
-  return r.score >= 100 && (x.indexOf('Số hiệu') === 0 || x.indexOf('Mã HS') === 0);
+  var d = r.doc, q = String(state.query || '').trim(), qd = q.replace(/[\s.]/g, '');
+  if (/^\d+$/.test(qd)) {
+    var soNum = String(d.so_hieu || '').split('/')[0].replace(/\D/g, '');
+    return soNum === qd || hsDigits(d.ma_hs) === qd;
+  }
+  return !!q && norm(d.so_hieu) === norm(q);
 }
 function wireResultButtons() {
   document.querySelectorAll('#view .ask-switch').forEach(function (b) {
@@ -2256,14 +2261,14 @@ function route() {
     var qb = $('#q'); if (qb) qb.value = '';
     state.branch = { type: nb[1], key: nb[2] };
     state.chapter = nb[1] === 'nhom' ? nb[2].slice(0, 2) : '';
-    syncQueryToUrl(); syncFilterControls(); updateModeUi();
+    syncQueryToUrl(); syncFilterControls();
     renderList();
     return;
   }
   state.branch = null;
   var c = /^#\/chuong\/([0-9]{2}|khong-co-ma)/.exec(h);
   if (c) {
-    clearAsk(); updateModeUi();
+    clearAsk();
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
     if (/[?&]hoi=/.test(location.search)) { state.query = ''; syncQueryToUrl(); }
     state.query = '';
@@ -2415,20 +2420,6 @@ function clearAsk() {
   state.mode = 'keyword'; state.askText = ''; state.askWeak = false; state.forced = false;
   var out = $('#askOut'); if (out) out.innerHTML = '';
 }
-var MODE_LABEL = { keyword: 'Tìm từ khóa', ask: 'Hỏi tự nhiên', code: 'tìm chính xác số hiệu / mã HS' };
-function updateModeUi(pending) {
-  var q = $('#q'), t = q ? q.value.trim() : '';
-  var eff = state.mode === 'ask' ? 'ask' : 'keyword';
-  document.querySelectorAll('.mode-btn').forEach(function (b) {
-    b.setAttribute('aria-pressed', String(!!t && !pending && b.getAttribute('data-mode') === eff));
-  });
-  var note = $('#modeNote');
-  if (!note) return;
-  if (pending === 'ask') note.textContent = 'Có vẻ là câu mô tả: nhấn Enter để hệ thống gợi ý mã HS (Hỏi tự nhiên).';
-  else if (!t) note.textContent = 'Hệ thống tự chọn chế độ theo nội dung bạn gõ.';
-  else if (state.forced) note.textContent = 'Đang dùng chế độ ' + MODE_LABEL[eff] + ' theo lựa chọn của bạn.';
-  else note.textContent = 'Hệ thống tự chọn: ' + MODE_LABEL[state.auto || eff] + '.';
-}
 /* Chạy tra cứu: chế độ Hỏi hiện thẻ trả lời ở trên + danh sách khớp từ khóa bên
    dưới; chế độ từ khóa / mã số chỉ hiện danh sách. opts.mode ép chế độ. */
 var _inputDeb = null;
@@ -2458,7 +2449,7 @@ function runLookup(text, opts) {
   }
   if (t) recordRecent(t);
   syncQueryToUrl();
-  updateModeUi();
+ 
   var onPage = onPageRoute() || /^#\/nhanh\//.test(location.hash);
   if (opts.restore && onPage) return;
   if (onPage) location.hash = '#/';
@@ -2566,10 +2557,10 @@ function boot() {
         showSuggestions();
         var v = q.value;
         /* Đang gõ một câu mô tả: chờ Enter mới hỏi, không làm mới danh sách liên tục. */
-        if (detectMode(v) === 'ask') { updateModeUi('ask'); return; }
+        if (detectMode(v) === 'ask') return;
         clearAsk();
         state.auto = detectMode(v); state.query = v; state.shown = PAGE_SIZE; state.branch = null;
-        syncQueryToUrl(); updateModeUi();
+        syncQueryToUrl();
         if (onPageRoute() || /^#\/nhanh\//.test(location.hash)) location.hash = '#/';
         else renderList();
       }, 150);
@@ -2613,14 +2604,6 @@ function boot() {
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       runLookup(q.value);
-    });
-    document.querySelectorAll('.mode-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var t = q.value.trim() || state.askText || state.query.trim();
-        if (!t) { q.focus(); return; }
-        q.value = t;
-        runLookup(t, { mode: b.getAttribute('data-mode') });
-      });
     });
     $('#askOut').addEventListener('click', function (e) {
       var a = e.target.closest('a[href^="#/bai/"]');
@@ -2667,7 +2650,7 @@ function boot() {
     $('#clearFilters').addEventListener('click', function () {
       state.loai = ''; state.chapter = ''; state.year = ''; state.query = '';
       q.value = ''; state.shown = PAGE_SIZE; state.branch = null;
-      clearAsk(); updateModeUi();
+      clearAsk();
       syncFilterControls();
       syncQueryToUrl();
       if (location.hash && location.hash !== '#/') location.hash = '#/';
@@ -2677,7 +2660,7 @@ function boot() {
     window.addEventListener('hashchange', route);
     route();
     if (initialHoi) runLookup(initialHoi, { mode: 'ask', restore: true });
-    updateModeUi();
+   
   }).catch(function (err) {
     document.getElementById('view').innerHTML =
       '<p class="empty">Không tải được dữ liệu kho (data.json). ' +
