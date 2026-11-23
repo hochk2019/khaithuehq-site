@@ -2661,7 +2661,7 @@ function runLookup(text, opts) {
 }
 /* Chốt một truy vấn từ khóa (nút "Ý bạn là", tìm kiếm liên quan). */
 /* Trang riêng (bài viết, so sánh, cây HS): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
-function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke)/.test(location.hash); }
+function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke|theo-doi)/.test(location.hash); }
 function commitSearch(text) {
   runLookup(text, { mode: 'keyword' });
 }
