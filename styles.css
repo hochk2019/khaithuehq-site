@@ -352,3 +352,61 @@ mark { background: #ffe08a; padding: 0 2px; border-radius: 3px; }
   .cmp-vs-mark { align-self: center; }
   .cmp-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* Ô tra cứu hợp nhất */
+.lookup-box { margin: -40px 0 12px; border-top: 4px solid var(--accent); }
+.lookup-box label { font-size: 1.12rem; font-weight: 800; color: var(--navy); }
+.lookup-sub { font-weight: 500; font-size: .92rem; color: var(--muted); }
+.lookup-box .ask-row input[type="search"] { width: auto; border-color: var(--accent); border-radius: 10px; }
+.lookup-box .chips button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.ask-out .ask-answer { margin: 0 0 12px; border: 1px solid var(--line); border-top: 4px solid var(--accent);
+  border-radius: var(--radius); background: var(--card); padding: 14px; box-shadow: var(--shadow); }
+.ask-filter-note { margin: 10px 0 0; font-size: .82rem; color: var(--muted); }
+.list-tools { margin: 0 0 12px; }
+.list-head { margin: 6px 0 10px; font-size: 1.05rem; color: var(--navy); }
+.mode-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--accent-light);
+  color: #08583f; font-size: .9rem; }
+.mode-hint button { border: 0; background: none; color: var(--accent); font-weight: 700; text-decoration: underline;
+  cursor: pointer; padding: 0; font-size: inherit; }
+.branch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 10px 12px;
+  border-radius: 10px; background: var(--hs-bg); font-size: .9rem; }
+.branch-bar b { color: var(--hs); }
+body.is-detail .list-tools { display: none; }
+
+/* Cây mã HS + thống kê */
+.tree-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.tree-tools button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: .85rem; }
+.hs-tree, .hs-tree ul { list-style: none; margin: 0; padding: 0; }
+.hs-tree ul { margin-left: 14px; padding-left: 10px; border-left: 2px solid var(--line); }
+.hs-tree li { margin: 4px 0; }
+.tree-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tree-toggle { flex: none; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  cursor: pointer; font-size: .9rem; line-height: 1; color: var(--navy); }
+.tree-toggle[aria-expanded="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
+.tree-spacer { flex: none; width: 28px; }
+.tree-link { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.tree-link:hover { border-color: var(--accent); }
+.tree-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: .92rem; }
+.tree-name b { color: var(--navy); }
+.tree-count { flex: none; font-size: .78rem; font-weight: 700; color: var(--hs); background: var(--hs-bg); border-radius: 999px; padding: 2px 8px; }
+.tree-node.is-empty > .tree-row .tree-link { opacity: .55; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+.stat-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-width: 0; }
+.stat-card b { display: block; font-size: 1.5rem; color: var(--navy); }
+.stat-card span { font-size: .85rem; color: var(--muted); }
+.stats-panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin: 0 0 14px; min-width: 0; }
+.stats-panel h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.hbar-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 34%) auto; align-items: center; gap: 8px;
+  padding: 4px 0; color: var(--ink); text-decoration: none; font-size: .88rem; }
+.hbar-row:hover .hbar-label { color: var(--accent); }
+.hbar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-row svg { width: 100%; height: 12px; display: block; }
+.hbar-row rect { fill: var(--accent); }
+.hbar-n { font-weight: 700; color: var(--navy); min-width: 2.5em; text-align: right; }
+.month-chart { width: 100%; height: auto; display: block; }
+.month-chart rect { fill: var(--navy); }
+.month-chart rect.is-last { fill: var(--accent); }
+.month-chart text { font-size: 10px; fill: #5a6a79; }
+.month-chart text.v { fill: var(--ink); font-weight: 700; }
+@media (min-width: 860px) { .stats-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } }
