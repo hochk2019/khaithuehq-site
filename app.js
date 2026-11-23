@@ -1474,7 +1474,8 @@ function cpDiff(a, b) {
 /* Cho phép kiểm thử bằng Node: VBXNK.searchDocs(...) */
 if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
-    detectMode: detectMode, hsTreeData: hsTreeData, statsData: statsData, inBranch: inBranch,
+    detectMode: detectMode, hsTreeData: hsTreeData, followMatch: followMatch, follows: follows,
+    toggleFollow: toggleFollow, newDocs: newDocs, totalNew: totalNew, seenSet: seenSet, markSeen: markSeen, statsData: statsData, inBranch: inBranch,
     norm: norm, lev: lev, hsDigits: hsDigits, parseDate: parseDate,
     buildIndex: buildIndex, searchDocs: searchDocs, suggest: suggest, askSuggest: askSuggest,
     didYouMean: didYouMean, relaxedSearch: relaxedSearch,
@@ -1489,6 +1490,7 @@ if (typeof globalThis !== 'undefined') {
     _setData: function (docs, drive, meta, img) {
       DOCS = docs; DRIVE = drive || {}; META = meta || {}; IMG = img || {};
       _suggestPool = null; _askPool = null; _vocab = null; _recents = null; _clicks = null; _nlIdx = null; _nlDf = {}; _cp = null;
+      _follows = null; _seen = null; _followSnap = null;
       buildIndex(docs);
     }
   };
@@ -1540,7 +1542,7 @@ function cardHtml(r) {
   }
   return '<article class="card">' +
     '<h3><a href="#/bai/' + d.ma + '">' + title + '</a></h3>' +
-    '<p class="sub">' + esc(d.ngay || '') + ' · ' + loaiBadge(d) + ' ' + hsBadge(d) + '</p>' +
+    '<p class="sub">' + esc(d.ngay || '') + ' · ' + loaiBadge(d) + ' ' + hsFollowPill(d) + '</p>' +
     '<p>' + prod + '</p>' + reason +
     '</article>';
 }
@@ -1755,6 +1757,7 @@ function renderDetail(ma) {
     return;
   }
   var det = parseDocDetail(doc);
+  markSeen([doc]); updateFollowBadge();
   var sub = [];
   if (det.coquan) sub.push(esc(det.coquan));
   if (det.soKqpt) sub.push('Số KQPT: ' + esc(det.soKqpt));
@@ -1763,6 +1766,7 @@ function renderDetail(ma) {
     '<article class="article">' +
     '<h1>' + esc(doc.so_hieu) + '</h1>' +
     '<p class="sub">' + esc(doc.ngay || '') + ' · ' + loaiBadge(doc) + ' ' + hsBadge(doc) +
+    (hsDigits(doc.ma_hs).length >= 2 ? ' ' + followBtnHtml(hsDigits(doc.ma_hs), 'Theo dõi mã HS ' + doc.ma_hs, 'follow-doc') : '') +
     (sub.length ? '<br>' + sub.join(' · ') : '') + '</p>' +
     '<h2>1. Tên hàng theo khai báo</h2><p>' + esc(det.sec1) + '</p>' +
     '<h2>2. Tóm tắt mô tả</h2><p>' + esc(det.sec2) + '</p>' +
@@ -2103,7 +2107,7 @@ function hsTreeData() {
   return _hsTree;
 }
 var _treeOpen = {};
-function treeNodeHtml(id, label, count, href, childrenHtml) {
+function treeNodeHtml(id, label, count, href, childrenHtml, followK) {
   var open = !!_treeOpen[id], hasKids = !!childrenHtml;
   return '<li class="tree-node' + (count ? '' : ' is-empty') + '"><div class="tree-row">' +
     (hasKids ? '<button type="button" class="tree-toggle" data-node="' + id + '" aria-expanded="' + open +
@@ -2111,7 +2115,8 @@ function treeNodeHtml(id, label, count, href, childrenHtml) {
       : '<span class="tree-spacer"></span>') +
     (count ? '<a class="tree-link" href="' + href + '">' : '<span class="tree-link">') +
     '<span class="tree-name">' + label + '</span><span class="tree-count">' + count + '</span>' +
-    (count ? '</a>' : '</span>') + '</div>' +
+    (count ? '</a>' : '</span>') +
+    (followK ? newBadgeHtml(followK) + followBtnHtml(followK, 'Theo dõi', 'follow-sm') : '') + '</div>' +
     (hasKids ? '<ul id="tn-' + id + '"' + (open ? '' : ' hidden') + '>' + childrenHtml + '</ul>' : '') + '</li>';
 }
 function hsTreeHtml() {
@@ -2120,9 +2125,9 @@ function hsTreeHtml() {
     var kids = Object.keys(sec.ch).sort().map(function (c) {
       var ch = sec.ch[c];
       var hk = Object.keys(ch.h).sort().map(function (h) {
-        return treeNodeHtml('h' + h, '<b>Nhóm ' + h + '</b>', ch.h[h], '#/nhanh/nhom/' + h, '');
+        return treeNodeHtml('h' + h, '<b>Nhóm ' + h + '</b>', ch.h[h], '#/nhanh/nhom/' + h, '', h);
       }).join('');
-      return treeNodeHtml('c' + c, '<b>Chương ' + c + '</b> · ' + esc(HS_CHAPTER_NAMES[c] || ''), ch.n, '#/chuong/' + c, hk);
+      return treeNodeHtml('c' + c, '<b>Chương ' + c + '</b> · ' + esc(HS_CHAPTER_NAMES[c] || ''), ch.n, '#/chuong/' + c, hk, c);
     }).join('');
     var label = sec.id ? '<b>Phần ' + sec.id + '</b> · ' + esc(sec.name) +
       ' <small>(Chương ' + pad2(sec.from) + (sec.to !== sec.from ? '–' + pad2(sec.to) : '') + ')</small>' : '<b>' + esc(sec.name) + '</b>';
@@ -2214,7 +2219,7 @@ function renderTreePage(scrollToStats) {
     '</div></div>' +
     '<div class="stats-panel"><h2>Mới nhất</h2>' + st.newest.map(function (d) {
       return '<article class="card"><h3><a href="#/bai/' + d.ma + '">' + esc(d.so_hieu) + '</a></h3><p class="sub">' +
-        esc(d.ngay || '') + ' · ' + loaiBadge(d) + ' ' + hsBadge(d) + '</p><p>' +
+        esc(d.ngay || '') + ' · ' + loaiBadge(d) + ' ' + hsFollowPill(d) + '</p><p>' +
         esc(shortText(d.mat_hang || d.trich_yeu, 140)) + '</p></article>';
     }).join('') + '</div></section>';
   var view = $('#view');
@@ -2243,17 +2248,213 @@ function renderTreePage(scrollToStats) {
   else window.scrollTo(0, 0);
 }
 
+/* ================= Theo dõi mã HS (chỉ lưu trên trình duyệt này) ================= */
+/* Mã theo dõi lưu dạng chữ số: 2 số = Chương, 4 số = Nhóm (khớp tiền tố), dài hơn = đúng mã đó.
+   "Mốc đã xem" là tập ma của các văn bản đã hiện cho người dùng; lần đầu mở site lấy cả kho làm mốc. */
+var FOLLOW_KEY = 'vbxnk_follows_v1', SEEN_KEY = 'vbxnk_seen_v1';
+var _follows = null, _seen = null;
+function follows() {
+  if (_follows) return _follows;
+  try { _follows = JSON.parse(lsGet(FOLLOW_KEY) || '[]'); } catch (e) { _follows = []; }
+  if (!Array.isArray(_follows)) _follows = [];
+  _follows = _follows.filter(function (k) { return /^\d{2,}$/.test(k); });
+  return _follows;
+}
+function isFollowed(k) { return follows().indexOf(k) !== -1; }
+function followMatch(k, hs) {
+  var dg = hsDigits(hs);
+  if (!dg || !k) return false;
+  return k.length <= 4 ? dg.indexOf(k) === 0 : dg === k;
+}
+function followDocs(k) {
+  return DOCS.filter(function (d) { return followMatch(k, d.ma_hs); })
+    .sort(function (a, b) { return parseDate(b.ngay) - parseDate(a.ngay); });
+}
+function saveSeen() { lsSet(SEEN_KEY, JSON.stringify(Object.keys(_seen))); }
+function seenSet() {
+  if (_seen) return _seen;
+  var raw = lsGet(SEEN_KEY), arr = null;
+  try { arr = raw == null ? null : JSON.parse(raw); } catch (e) { arr = null; }
+  _seen = {};
+  if (Array.isArray(arr)) arr.forEach(function (m) { _seen[m] = 1; });
+  else { DOCS.forEach(function (d) { _seen[d.ma] = 1; }); saveSeen(); }
+  return _seen;
+}
+function markSeen(docs) {
+  if (lsGet(SEEN_KEY) != null) _seen = null;
+  var st = seenSet(), changed = false;
+  docs.forEach(function (d) { if (!st[d.ma]) { st[d.ma] = 1; changed = true; } });
+  if (changed) saveSeen();
+}
+function newDocs(k) {
+  var st = seenSet();
+  return followDocs(k).filter(function (d) { return !st[d.ma]; });
+}
+function totalNew() {
+  var st = seenSet(), fs = follows(), n = 0;
+  if (!fs.length) return 0;
+  DOCS.forEach(function (d) {
+    if (!st[d.ma] && fs.some(function (k) { return followMatch(k, d.ma_hs); })) n++;
+  });
+  return n;
+}
+/* Bắt đầu theo dõi thì coi các văn bản hiện có của mã đó là đã xem: chỉ báo văn bản về sau. */
+function toggleFollow(k, on) {
+  if (lsGet(FOLLOW_KEY) != null) _follows = null;
+  var fs = follows(), i = fs.indexOf(k);
+  if (on === undefined) on = i === -1;
+  if (on && i === -1) {
+    markSeen(followDocs(k).filter(function (d) {
+      return !fs.some(function (f) { return followMatch(f, d.ma_hs); });
+    }));
+    fs.push(k);
+  }
+  else if (!on && i !== -1) fs.splice(i, 1);
+  lsSet(FOLLOW_KEY, JSON.stringify(fs));
+  return on;
+}
+function hsDisplay(k) {
+  for (var i = 0; i < DOCS.length; i++) if (hsDigits(DOCS[i].ma_hs) === k) return DOCS[i].ma_hs;
+  return k.length === 8 ? k.slice(0, 4) + '.' + k.slice(4, 6) + '.' + k.slice(6) : k;
+}
+function followLabel(k) {
+  if (k.length === 2) return 'Chương ' + k;
+  if (k.length === 4) return 'Nhóm ' + k;
+  return 'Mã HS ' + hsDisplay(k);
+}
+function followName(k) {
+  var c = k.slice(0, 2), n = HS_CHAPTER_NAMES[c] || '';
+  if (k.length === 2) return n;
+  return 'Chương ' + c + (n ? ' · ' + n : '');
+}
+function followTitle(k, on) { return (on ? 'Bỏ theo dõi ' : 'Theo dõi ') + followLabel(k); }
+function followBtnHtml(k, label, cls) {
+  var on = isFollowed(k);
+  return '<button type="button" class="follow-btn' + (cls ? ' ' + cls : '') + (on ? ' is-on' : '') +
+    '" data-follow="' + k + '" data-label="' + esc(label) + '" aria-pressed="' + on + '" title="' +
+    esc(followTitle(k, on)) + '">' + (on ? 'Đang theo dõi ✓' : esc(label)) + '</button>';
+}
+/* Mã HS dạng pill bấm được để theo dõi đúng mã đó. */
+function hsFollowPill(d, cls) {
+  var k = hsDigits(d.ma_hs);
+  if (k.length < 2) return cls ? '<span class="' + cls + '">' + esc(d.ma_hs || '') + '</span>' : hsBadge(d);
+  var on = isFollowed(k);
+  return '<button type="button" class="' + (cls || 'hs-badge') + ' hs-follow' + (on ? ' is-on' : '') +
+    '" data-follow="' + k + '" data-pill="1" aria-pressed="' + on + '" title="' + esc(followTitle(k, on)) + '">' +
+    (cls ? '' : 'HS ') + esc(d.ma_hs) + ' <small>' + (on ? 'Đang theo dõi ✓' : '+ Theo dõi') + '</small></button>';
+}
+function newBadgeHtml(k) {
+  if (!isFollowed(k)) return '';
+  var n = newDocs(k).length;
+  return n ? '<span class="new-badge" data-new="' + k + '" title="' + n + ' văn bản mới từ lần xem trước">' + n + ' mới</span>' : '';
+}
+function refreshFollowButtons(k) {
+  var on = isFollowed(k);
+  document.querySelectorAll('[data-follow="' + k + '"]').forEach(function (b) {
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.setAttribute('title', followTitle(k, on));
+    if (b.getAttribute('data-pill')) { var sm = b.querySelector('small'); if (sm) sm.textContent = on ? 'Đang theo dõi ✓' : '+ Theo dõi'; }
+    else b.textContent = on ? 'Đang theo dõi ✓' : b.getAttribute('data-label');
+  });
+  document.querySelectorAll('.new-badge[data-new="' + k + '"]').forEach(function (b) { b.remove(); });
+}
+function updateFollowBadge() {
+  var b = document.getElementById('followBadge');
+  if (!b) return;
+  var n = totalNew();
+  b.textContent = n > 99 ? '99+' : String(n);
+  b.hidden = !n;
+  var a = b.closest('a');
+  if (a) a.setAttribute('aria-label', 'Đang theo dõi' + (n ? ', ' + n + ' văn bản mới' : ''));
+}
+function followHref(k) {
+  if (k.length === 2) return '#/chuong/' + k;
+  if (k.length === 4) return '#/nhanh/nhom/' + k;
+  return '?q=' + encodeURIComponent(hsDisplay(k)) + '#/';
+}
+var _followSnap = null;
+function renderFollowPage() {
+  $('#resultInfo').textContent = '';
+  var fs = follows().slice(), seen = seenSet(), shown = [];
+  if (!_followSnap) {
+    _followSnap = {};
+    DOCS.forEach(function (d) { if (!seen[d.ma]) _followSnap[d.ma] = 1; });
+  }
+  var st = {};
+  DOCS.forEach(function (d) { if (!_followSnap[d.ma]) st[d.ma] = 1; });
+  var html = '<section class="follow-page"><h1 class="page-title">Đang theo dõi</h1>';
+  if (!fs.length) {
+    html += '<div class="follow-empty"><p>Bạn chưa theo dõi mã HS nào. Bấm <b>Theo dõi</b> cạnh mã HS ở trang văn bản, ' +
+      'ở Chương/Nhóm trong <a href="#/cay-hs">cây mã HS</a> hoặc trên mã HS của kết quả tra cứu. Mỗi lần quay lại, ' +
+      'chuông ở đầu trang sẽ báo số văn bản mới thuộc các mã bạn theo dõi.</p>' +
+      '<h2>Gợi ý: các chương có nhiều văn bản nhất trong kho</h2><ul class="follow-suggest">' +
+      statsData().topCh.slice(0, 5).map(function (x) {
+        return '<li><a href="#/chuong/' + x.c + '"><b>Chương ' + x.c + '</b> · ' + esc(HS_CHAPTER_NAMES[x.c] || '') + '</a>' +
+          '<span class="tree-count">' + x.n + ' văn bản</span>' + followBtnHtml(x.c, 'Theo dõi', 'follow-sm') + '</li>';
+      }).join('') + '</ul></div>';
+  } else {
+    html += '<div class="follow-tools"><button type="button" class="btn ghost" id="seenAll">Đánh dấu đã xem hết</button></div>' +
+      '<ul class="follow-list">' + fs.map(function (k) {
+        var all = followDocs(k), fresh = all.filter(function (d) { return !st[d.ma]; });
+        var latest = fresh.concat(all.filter(function (d) { return st[d.ma]; })).slice(0, 5), nNew = fresh.length;
+        shown = shown.concat(all);
+        var name = followName(k);
+        return '<li class="follow-item"><div class="follow-head"><div class="follow-title"><b>' + esc(followLabel(k)) + '</b>' +
+          (name ? '<span>' + esc(name) + '</span>' : '') + '</div>' +
+          '<span class="tree-count">' + all.length + ' văn bản</span>' +
+          (nNew ? '<span class="new-badge" data-new="' + k + '">' + nNew + ' mới</span>' : '') +
+          '<button type="button" class="follow-btn follow-sm" data-unfollow="' + k + '">Bỏ theo dõi</button></div>' +
+          (latest.length ? '<ul class="follow-docs">' + latest.map(function (d) {
+            return '<li><a href="#/bai/' + d.ma + '"><b>' + esc(d.so_hieu) + '</b></a>' +
+              (st[d.ma] ? '' : ' <span class="new-tag">Mới</span>') + ' · ' + esc(d.ngay || '') + ' · HS ' + esc(d.ma_hs) +
+              '<br><span class="follow-goods">' + esc(shortText(d.mat_hang || d.trich_yeu, 120)) + '</span></li>';
+          }).join('') + '</ul>' : '<p class="empty">Chưa có văn bản nào trong kho thuộc mã này.</p>') +
+          (all.length > latest.length ? '<p class="follow-more"><a href="' + followHref(k) + '">Xem tất cả ' + all.length +
+            ' văn bản →</a></p>' : '') + '</li>';
+      }).join('') + '</ul>';
+  }
+  html += '<p class="follow-note">Danh sách theo dõi chỉ lưu trên trình duyệt này.</p></section>';
+  $('#view').innerHTML = html;
+  markSeen(shown);
+  updateFollowBadge();
+  var sa = $('#seenAll');
+  if (sa) sa.addEventListener('click', function () {
+    markSeen(DOCS); _followSnap = {}; updateFollowBadge();
+    document.querySelectorAll('#view .new-badge, #view .new-tag').forEach(function (b) { b.remove(); });
+  });
+  updateMeta(null);
+  var t = document.querySelector('title');
+  if (t) t.textContent = 'Đang theo dõi | Văn bản XNK';
+  window.scrollTo(0, 0);
+}
+function onFollowClick(e) {
+  var u = e.target.closest('[data-unfollow]');
+  if (u) { toggleFollow(u.getAttribute('data-unfollow'), false); updateFollowBadge(); renderFollowPage(); return; }
+  var b = e.target.closest('[data-follow]');
+  if (!b) return;
+  e.preventDefault();
+  var k = b.getAttribute('data-follow');
+  toggleFollow(k);
+  if (_followSnap) followDocs(k).forEach(function (d) { delete _followSnap[d.ma]; });
+  refreshFollowButtons(k);
+  updateFollowBadge();
+  if (/^#\/theo-doi/.test(location.hash)) renderFollowPage();
+}
+
 /* ================= Định tuyến & khởi động ================= */
 
 function route() {
   var h = location.hash || '#/';
   var m = /^#\/bai\/(\d+)/.exec(h);
   var pb = /^#\/phan-biet(?:\/(\d+)-(\d+))?/.exec(h);
-  var tree = /^#\/(cay-hs|thong-ke)\/?$/.test(h);
-  document.body.classList.toggle('is-detail', !!m || !!pb || tree);
+  var tree = /^#\/(cay-hs|thong-ke)\/?$/.test(h), fd = /^#\/theo-doi\/?$/.test(h);
+  document.body.classList.toggle('is-detail', !!m || !!pb || tree || fd);
   if (m) { renderDetail(m[1]); return; }
   if (pb) { if (pb[1]) renderCompare(pb[1], pb[2]); else renderCompareList(); return; }
   if (tree) { renderTreePage(h.indexOf('thong-ke') !== -1); return; }
+  if (fd) { renderFollowPage(); return; }
+  _followSnap = null;
   var nb = /^#\/nhanh\/(phan|nhom)\/([0-9IVX]+)/.exec(h);
   if (nb) {
     clearAsk();
@@ -2261,6 +2462,7 @@ function route() {
     var qb = $('#q'); if (qb) qb.value = '';
     state.branch = { type: nb[1], key: nb[2] };
     state.chapter = nb[1] === 'nhom' ? nb[2].slice(0, 2) : '';
+    if (nb[1] === 'nhom' && isFollowed(nb[2])) { markSeen(followDocs(nb[2])); updateFollowBadge(); }
     syncQueryToUrl(); syncFilterControls();
     renderList();
     return;
@@ -2270,6 +2472,7 @@ function route() {
   if (c) {
     clearAsk();
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
+    if (isFollowed(c[1])) { markSeen(followDocs(c[1])); updateFollowBadge(); }
     if (/[?&]hoi=/.test(location.search)) { state.query = ''; syncQueryToUrl(); }
     state.query = '';
     var q = $('#q'); if (q) q.value = '';
@@ -2448,6 +2651,7 @@ function runLookup(text, opts) {
     state.query = t;
   }
   if (t) recordRecent(t);
+  if (auto === 'code' && isFollowed(hsDigits(t))) { markSeen(followDocs(hsDigits(t))); updateFollowBadge(); }
   syncQueryToUrl();
  
   var onPage = onPageRoute() || /^#\/nhanh\//.test(location.hash);
@@ -2457,7 +2661,7 @@ function runLookup(text, opts) {
 }
 /* Chốt một truy vấn từ khóa (nút "Ý bạn là", tìm kiếm liên quan). */
 /* Trang riêng (bài viết, so sánh, cây HS): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
-function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke)/.test(location.hash); }
+function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke|theo-doi)/.test(location.hash); }
 function commitSearch(text) {
   runLookup(text, { mode: 'keyword' });
 }
@@ -2487,7 +2691,7 @@ function askResultHtml(r, n) {
   }
   return '<li class="ask-item">' +
     '<div class="ask-item-head"><span class="ask-rank">' + n + '</span>' +
-    '<span class="ask-hs">' + esc(d.ma_hs) + '</span>' +
+    hsFollowPill(d, 'ask-hs') +
     '<span class="conf ' + confClass(r.level) + '">Tin cậy: ' + r.confidence + '</span></div>' +
     '<p class="ask-goods">' + esc(shortText(d.mat_hang || d.trich_yeu, 180)) + '</p>' +
     '<p class="ask-cite">Nguồn: <a href="#/bai/' + d.ma + '"><b>' + esc(d.so_hieu) + '</b></a> · ' +
@@ -2536,6 +2740,8 @@ function boot() {
   ]).then(function (parts) {
     DOCS = parts[0]; DRIVE = parts[1]; META = parts[2]; IMG = parts[3] || {};
     buildIndex(DOCS);
+    seenSet(); updateFollowBadge();
+    document.addEventListener('click', onFollowClick);
     var total = document.getElementById('totalCount');
     if (total) total.textContent = (META.total || DOCS.length).toLocaleString('vi-VN');
     var upd = document.getElementById('updatedAt');
