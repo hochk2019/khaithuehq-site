@@ -467,7 +467,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 .wrap { max-width: 1040px; }
-:where(a, button, select, input):focus-visible { outline: none; box-shadow: var(--focus); }
+:where(a, button, select, input):focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus); }
 
 /* Header + menu */
 .site-header { padding: 10px 0 64px; }
