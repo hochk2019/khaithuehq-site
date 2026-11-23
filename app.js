@@ -2869,8 +2869,35 @@ function boot() {
   });
 }
 
+/* Menu gọn trên màn hình nhỏ: chạy ngay, không chờ data.json. */
+function wireNav() {
+  var btn = document.getElementById('navToggle'), header = document.querySelector('.site-header');
+  if (!btn || !header) return;
+  function setOpen(open) {
+    header.classList.toggle('nav-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Đóng menu' : 'Mở menu');
+  }
+  btn.addEventListener('click', function () { setOpen(!header.classList.contains('nav-open')); });
+  document.getElementById('mainNav').addEventListener('click', function (e) {
+    if (e.target.closest('a')) setOpen(false);
+  });
+  function markActive() {
+    var h = location.hash || '#/';
+    var key = h === '#/' || /^#\/(bai|nhanh)\//.test(h) ? '#/' : '#/' + h.slice(2).split('/')[0];
+    if (key === '#/thong-ke') key = '#/cay-hs';
+    Array.prototype.forEach.call(document.querySelectorAll('#mainNav a[href^="#/"]'), function (a) {
+      var on = a.getAttribute('href') === key;
+      a.classList.toggle('is-active', on);
+      if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+  }
+  markActive();
+  window.addEventListener('hashchange', function () { setOpen(false); markActive(); });
+}
+
 if (typeof document !== 'undefined' && document.addEventListener) {
-  document.addEventListener('DOMContentLoaded', boot);
+  document.addEventListener('DOMContentLoaded', function () { wireNav(); boot(); });
 }
 
 })();

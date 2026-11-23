@@ -11,13 +11,16 @@
 <meta property="og:url" content="">
 <meta property="og:image" content="https://khaithuehq.loc.cc/logo.webp">
 <link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#0a2239">
+<link rel="preload" href="data.json" as="fetch" crossorigin>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="site-header">
   <div class="wrap header-bar">
-    <a class="brand" href="#/"><img class="brand-logo" src="logo.webp" alt="Logo Văn bản XNK">Văn bản XNK</a>
-    <nav aria-label="Điều hướng chính">
+    <a class="brand" href="#/"><img class="brand-logo" src="logo.webp" alt="Logo Văn bản XNK" width="44" height="44">Văn bản XNK</a>
+    <button type="button" class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="mainNav" aria-label="Mở menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg></button>
+    <nav id="mainNav" aria-label="Điều hướng chính">
       <a href="#/">Mới nhất</a>
       <a href="#/chuong">Duyệt theo chương HS</a>
       <a href="#/phan-biet">Phân biệt mã dễ nhầm</a>
@@ -35,7 +38,7 @@
 <main class="wrap">
   <section class="search-box lookup-box" aria-labelledby="qLabel">
     <form id="searchForm" autocomplete="off" role="search">
-      <label id="qLabel" for="q">Tra cứu mã HS <span class="lookup-sub">— gõ tên hàng, số hiệu, mã HS hoặc mô tả bằng tiếng Việt tự nhiên</span></label>
+      <label id="qLabel" for="q">Tra cứu mã HS <span class="lookup-sub">Gõ tên hàng, số hiệu, mã HS hoặc mô tả bằng tiếng Việt tự nhiên</span></label>
       <div class="ask-row">
         <input id="q" type="search" placeholder="Ví dụ: vải sofa, thép tròn, 3504, 1397, vải dệt kim cotton pha polyester làm áo thun…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" enterkeyhint="search">
         <button type="submit" class="ask-btn">Tra cứu</button>
@@ -72,7 +75,7 @@
     <p id="resultInfo" class="result-info">Đang tải dữ liệu…</p>
   </section>
 
-  <div id="view"></div>
+  <div id="view"><div class="skeleton" aria-hidden="true"><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div></div></div>
 </main>
 
 <footer class="site-footer">
