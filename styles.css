@@ -495,7 +495,6 @@ body {
 }
 @media (min-width: 860px) {
   .nav-toggle { display: none; }
-  .site-header nav { flex-wrap: nowrap; }
   .site-header nav a { white-space: nowrap; font-size: .86rem; padding: 6px 11px; }
 }
 .hero { margin-top: 14px; }
