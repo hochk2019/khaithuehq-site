@@ -713,7 +713,60 @@ function askSuggest(text) {
       phraseMatches(words.slice(0, -1).concat([e.text]), true).slice(0, 3).forEach(push);
     });
   }
+  /* Vẫn chưa có gợi ý: tìm tên hàng chứa đủ các từ đã gõ, không cần liền nhau
+     ("thép tròn" → "thép tròn trơn" từ "Thép không hợp kim dạng que, tròn trơn"). */
+  if (!out.length) askCooccur(words, endsSpace).forEach(push);
   return out;
+}
+var _askToks = null;
+function askCooccur(words, endsSpace) {
+  var ws = words.filter(function (w) { return norm(w); });
+  if (ws.length < 2) return [];
+  var heads = ws.slice(0, -1).map(viKey), last = viKey(ws[ws.length - 1]);
+  if (!endsSpace && norm(last).length < 2) return [];
+  if (!_askToks) _askToks = DOCS.map(function (d) {
+    var toks = [];
+    String(d.mat_hang || d.trich_yeu || '').split(/[,;:()\[\]\/\.\n"“”]+/).forEach(function (cl, ci) {
+      viKey(cl).split(' ').filter(Boolean).forEach(function (w) { toks.push({ w: w, n: norm(w), c: ci }); });
+    });
+    return toks;
+  });
+  function same(tw, t, prefix) {
+    var a = hasDia(tw) ? t.w : t.n, b = hasDia(tw) ? tw : norm(tw);
+    return prefix ? a.indexOf(b) === 0 : a === b;
+  }
+  function endOk(w) { return NL_STOP.indexOf(w) === -1 && ASK_END_EXTRA.indexOf(w) === -1 && !/\d/.test(w); }
+  var headNs = heads.map(norm), found = {};
+  _askToks.forEach(function (toks) {
+    if (!heads.every(function (hw) { return toks.some(function (t) { return same(hw, t, false); }); })) return;
+    var seenDoc = {};
+    toks.forEach(function (t, i) {
+      if (headNs.indexOf(t.n) !== -1 || !same(last, t, !endsSpace)) return;
+      var tail = [t.w];
+      for (var j = i + 1; j < toks.length && tail.length < (endsSpace ? 2 : 2) && toks[j].c === t.c; j++) {
+        if (!endOk(toks[j].w) || toks[j].w.length > 20) break;
+        tail.push(toks[j].w);
+      }
+      while (tail.length && !endOk(tail[tail.length - 1])) tail.pop();
+      if (!tail.length || (endsSpace && tail.length < 2)) return;
+      var key = norm(tail.join(' '));
+      if (seenDoc[key]) return;
+      seenDoc[key] = 1;
+      var f = found[key] = found[key] || { tail: tail, n: 0 };
+      f.n++;
+    });
+  });
+  var headRaw = words.slice(0, endsSpace ? words.length : -1).join(' ');
+  return Object.keys(found).map(function (k) { return found[k]; })
+    .sort(function (a, b) { return b.n - a.n || a.tail.length - b.tail.length; })
+    .slice(0, 4).map(function (f) {
+      var rest = endsSpace ? f.tail.slice(1) : f.tail, typedN = endsSpace ? 0 : norm(last).length;
+      var first = rest[0], html = esc(headRaw) + ' ';
+      if (!endsSpace) html += esc(first.slice(0, typedN)) + '<b>' + esc(first.slice(typedN) + (rest.length > 1 ? ' ' + rest.slice(1).join(' ') : '')) + '</b>';
+      else html += '<b>' + esc(rest.join(' ')) + '</b>';
+      return { text: headRaw + ' ' + rest.join(' '), html: html,
+        kind: 'Tên hàng · ' + f.n + ' văn bản', action: 'ask' };
+    });
 }
 
 /* ================= Tách nội dung bài ================= */
