@@ -2607,7 +2607,8 @@ function detectMode(text) {
 }
 function looksLikeDescription(text) {
   var m = detectMode(text);
-  return m === 'ask' || (m === 'keyword' && String(text).trim().split(/\s+/).length >= 3);
+  return m === 'ask' || (m === 'keyword' &&
+    String(text).trim().split(/\s+/).filter(function (w) { return norm(w); }).length >= 3);
 }
 function clearAsk() {
   state.mode = 'keyword'; state.askText = ''; state.askWeak = false; state.forced = false;
