@@ -2440,6 +2440,7 @@ function route() {
   var pb = /^#\/phan-biet(?:\/(\d+)-(\d+))?/.exec(h);
   var tree = /^#\/(cay-hs|thong-ke)\/?$/.test(h), fd = /^#\/theo-doi\/?$/.test(h);
   document.body.classList.toggle('is-detail', !!m || !!pb || tree || fd);
+  if (m || pb || tree || fd || h === '#/chuong') hideAskForPage();
   if (m) { renderDetail(m[1]); return; }
   if (pb) { if (pb[1]) renderCompare(pb[1], pb[2]); else renderCompareList(); return; }
   if (tree) { renderTreePage(h.indexOf('thong-ke') !== -1); return; }
@@ -2485,7 +2486,18 @@ function route() {
   if (h === '#/chuong') { renderChapters(); return; }
   state.chapter = '';
   syncFilterControls();
+  if (_askHidden) {
+    _askHidden = false;
+    var hoi = new URLSearchParams(location.search).get('hoi');
+    if (hoi) { runLookup(hoi, { mode: 'ask', restore: true }); return; }
+  }
   renderList();
+}
+/* Trang riêng không hiện thẻ Hỏi; quay về danh sách khi URL còn ?hoi= thì dựng lại thẻ. */
+var _askHidden = false;
+function hideAskForPage() {
+  if (state.askText) _askHidden = true;
+  clearAsk();
 }
 
 function syncFilterControls() {
@@ -2624,7 +2636,7 @@ function askListQuery(kw) {
   return ws.join(' ');
 }
 function runLookup(text, opts) {
-  opts = opts || {};
+  opts = opts || {}; _askHidden = false;
   clearTimeout(_inputDeb);
   var t = String(text == null ? '' : text).trim();
   var auto = detectMode(t), autoMode = looksLikeDescription(t) ? 'ask' : 'keyword';
