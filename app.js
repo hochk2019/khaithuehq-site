@@ -2873,7 +2873,7 @@ function boot() {
       var next = url.pathname + url.search + url.hash;
       if (next !== location.pathname + location.search + location.hash) {
         history.replaceState({ filters: { loai: prevLoai, chapter: prevChapter, year: prevYear } }, '');
-        history.pushState(null, '', next);
+        history.pushState({ filters: { loai: state.loai, chapter: state.chapter, year: state.year } }, '', next);
       }
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
