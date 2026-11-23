@@ -2643,29 +2643,36 @@ function runLookup(text, opts) {
   }
   if (t) recordRecent(t);
   if (auto === 'code' && isFollowed(hsDigits(t))) { markSeen(followDocs(hsDigits(t))); updateFollowBadge(); }
-  syncQueryToUrl();
- 
   var onPage = onPageRoute() || /^#\/nhanh\//.test(location.hash);
-  if (opts.restore && onPage) return;
-  if (onPage) location.hash = '#/';
-  else renderList();
+  if (opts.restore && onPage) { syncQueryToUrl(); return; }
+  if (!opts.restore && lookupLeavesPage()) { goHomeWithQuery(); return; }
+  syncQueryToUrl();
+  renderList();
 }
 /* Chốt một truy vấn từ khóa (nút "Ý bạn là", tìm kiếm liên quan). */
 /* Trang riêng (bài viết, so sánh, cây HS): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
-function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke|theo-doi|chuong\/?$)/.test(location.hash); }
+function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke|theo-doi)/.test(location.hash); }
+/* Tra cứu từ các trang này (cả mục lục chương) mở trang chủ ở mục lịch sử mới, để Back về đúng trang cũ. */
+function lookupLeavesPage() { return onPageRoute() || /^#\/(nhanh\/|chuong\/?$)/.test(location.hash); }
+function goHomeWithQuery() { syncQueryToUrl('#/'); window.dispatchEvent(new HashChangeEvent('hashchange')); }
+function rememberFilters(f) {
+  try { history.replaceState({ filters: f || { loai: state.loai, chapter: state.chapter, year: state.year } }, ''); } catch (e) { /* bỏ qua */ }
+}
 function commitSearch(text) {
   runLookup(text, { mode: 'keyword' });
 }
 /* Đưa truy vấn vào URL để link chia sẻ được, nút Back hoạt động và Cloudflare
    Web Analytics (không cookie) ghi lại truy vấn thật: ?q= cho từ khóa,
    ?hoi= cho câu hỏi tự nhiên (giữ tương thích link cũ của cả hai ô). */
-function syncQueryToUrl() {
+function syncQueryToUrl(hash) {
   try {
     var url = new URL(location.href);
     url.searchParams.delete('q'); url.searchParams.delete('hoi');
     if (state.mode === 'ask' && state.askText) url.searchParams.set('hoi', state.askText);
     else if (state.query && state.query.trim()) url.searchParams.set('q', state.query.trim());
-    history.replaceState(null, '', url.pathname + url.search + location.hash);
+    var next = url.pathname + url.search + (hash || location.hash);
+    if (hash && hash !== location.hash) history.pushState(null, '', next);
+    else history.replaceState(history.state, '', next);
   } catch (e) { /* trình duyệt quá cũ: bỏ qua */ }
 }
 
@@ -2757,9 +2764,9 @@ function boot() {
         if (detectMode(v) === 'ask') return;
         clearAsk();
         state.auto = detectMode(v); state.query = v; state.shown = PAGE_SIZE; state.branch = null;
+        if (lookupLeavesPage()) { goHomeWithQuery(); return; }
         syncQueryToUrl();
-        if (onPageRoute() || /^#\/nhanh\//.test(location.hash)) location.hash = '#/';
-        else renderList();
+        renderList();
       }, 150);
     });
     /* Dựng sẵn bộ gợi ý khi người dùng chạm vào ô, không làm chậm lần tải trang. */
@@ -2838,13 +2845,13 @@ function boot() {
       });
     });
     $('#fLoai').addEventListener('change', function (e) {
-      state.loai = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.loai = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#fChuong').addEventListener('change', function (e) {
-      state.chapter = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.chapter = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#fNam').addEventListener('change', function (e) {
-      state.year = e.target.value; state.shown = PAGE_SIZE; renderList();
+      state.year = e.target.value; state.shown = PAGE_SIZE; rememberFilters(); renderList();
     });
     $('#clearFilters').addEventListener('click', function () {
       state.loai = ''; state.chapter = ''; state.year = ''; state.query = '';
@@ -2872,7 +2879,7 @@ function boot() {
       url.hash = href;
       var next = url.pathname + url.search + url.hash;
       if (next !== location.pathname + location.search + location.hash) {
-        history.replaceState({ filters: { loai: prevLoai, chapter: prevChapter, year: prevYear } }, '');
+        rememberFilters({ loai: prevLoai, chapter: prevChapter, year: prevYear });
         history.pushState({ filters: { loai: state.loai, chapter: state.chapter, year: state.year } }, '', next);
       }
       window.dispatchEvent(new HashChangeEvent('hashchange'));
