@@ -410,3 +410,41 @@ body.is-detail .list-tools { display: none; }
 .month-chart text { font-size: 10px; fill: #5a6a79; }
 .month-chart text.v { fill: var(--ink); font-weight: 700; }
 @media (min-width: 860px) { .stats-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } }
+
+/* ---------- Theo dõi mã HS ---------- */
+.nav-follow { display: inline-flex; align-items: center; gap: 5px; }
+.nav-follow svg { flex: none; }
+.follow-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #e5484d; color: #fff;
+  font-size: .72rem; font-weight: 800; line-height: 18px; text-align: center; }
+.follow-badge[hidden] { display: none; }
+.follow-btn { border: 1px solid var(--accent); background: #fff; color: var(--accent); border-radius: 999px;
+  padding: 3px 10px; font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.follow-btn:hover { background: var(--accent-light); }
+.follow-btn.is-on { background: var(--accent); color: #fff; }
+.follow-sm { flex: none; padding: 2px 8px; font-size: .74rem; }
+.follow-doc { vertical-align: middle; margin-left: 4px; }
+.hs-follow { border: 1px solid transparent; font: inherit; cursor: pointer; text-align: left; }
+.hs-badge.hs-follow { font-size: .9rem; font-weight: 700; }
+.hs-follow small { font-size: .72rem; font-weight: 600; opacity: .8; margin-left: 2px; white-space: nowrap; }
+.hs-follow:hover { border-color: var(--hs); }
+.hs-follow.is-on small { color: var(--accent); opacity: 1; }
+.ask-hs.hs-follow { background: none; padding: 0; color: var(--hs); }
+.new-badge { flex: none; background: #e5484d; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: .74rem; font-weight: 800; }
+.new-tag { background: #ffe1e1; color: #b42318; border-radius: 6px; padding: 0 6px; font-size: .74rem; font-weight: 800; }
+.follow-tools { margin: 0 0 12px; }
+.follow-list, .follow-suggest, .follow-docs { list-style: none; margin: 0; padding: 0; }
+.follow-list { display: grid; gap: 12px; }
+.follow-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
+.follow-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.follow-title { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; }
+.follow-title b { color: var(--navy); font-size: 1.05rem; }
+.follow-title span { color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+.follow-docs { margin-top: 8px; display: grid; gap: 8px; }
+.follow-docs li { border-top: 1px solid var(--line); padding-top: 8px; font-size: .9rem; overflow-wrap: anywhere; }
+.follow-goods { color: var(--muted); font-size: .85rem; }
+.follow-more { margin: 8px 0 0; font-size: .88rem; }
+.follow-suggest { display: grid; gap: 8px; }
+.follow-suggest li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+.follow-suggest li a { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.follow-note { color: var(--muted); font-size: .82rem; margin-top: 16px; }
