@@ -1474,6 +1474,7 @@ function cpDiff(a, b) {
 /* Cho phép kiểm thử bằng Node: VBXNK.searchDocs(...) */
 if (typeof globalThis !== 'undefined') {
   globalThis.VBXNK = {
+    detectMode: detectMode, hsTreeData: hsTreeData, statsData: statsData, inBranch: inBranch,
     norm: norm, lev: lev, hsDigits: hsDigits, parseDate: parseDate,
     buildIndex: buildIndex, searchDocs: searchDocs, suggest: suggest, askSuggest: askSuggest,
     didYouMean: didYouMean, relaxedSearch: relaxedSearch,
@@ -1496,7 +1497,8 @@ if (typeof globalThis !== 'undefined') {
 /* ================= Hiển thị (chỉ chạy trên trình duyệt) ================= */
 
 var PAGE_SIZE = 30;
-var state = { query: '', loai: '', chapter: '', year: '', shown: PAGE_SIZE };
+var state = { query: '', loai: '', chapter: '', year: '', shown: PAGE_SIZE,
+  mode: 'keyword', auto: 'keyword', forced: false, askText: '', askWeak: false, branch: null };
 var _lastResults = [];
 
 function $(sel) { return document.querySelector(sel); }
@@ -1583,7 +1585,18 @@ function zeroResultHtml() {
   return html;
 }
 
+function isExactIdHit(r) {
+  var x = r.reasons && r.reasons[0] || '';
+  return r.score >= 100 && (x.indexOf('Số hiệu') === 0 || x.indexOf('Mã HS') === 0);
+}
 function wireResultButtons() {
+  document.querySelectorAll('#view .ask-switch').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = ($('#q') && $('#q').value.trim()) || state.query;
+      runLookup(t, { mode: 'ask' });
+      window.scrollTo(0, 0);
+    });
+  });
   document.querySelectorAll('#view .dym-btn, #view .rel-chip').forEach(function (b) {
     b.addEventListener('click', function () {
       var q = $('#q');
@@ -1597,28 +1610,54 @@ function renderList() {
   var results = searchDocs(state.query, {
     loai: state.loai, chapter: state.chapter, year: state.year
   });
+  if (state.branch) results = results.filter(function (r) { return inBranch(r.doc, state.branch); });
   _lastResults = results;
   var view = $('#view');
   var info = $('#resultInfo');
-  if (state.query || state.loai || state.chapter || state.year) {
+  var asking = state.mode === 'ask' && !!state.askText;
+  if (state.branch) {
+    info.textContent = 'Tìm thấy ' + results.length + ' văn bản thuộc ' + branchLabel(state.branch) + '.';
+  } else if (state.query || state.loai || state.chapter || state.year) {
     info.textContent = 'Tìm thấy ' + results.length + ' văn bản' +
-      (state.query ? ' cho “' + state.query.trim() + '”' : '') + '.';
+      (state.query ? ' khớp từ khóa “' + state.query.trim() + '”' : '') + '.';
   } else {
     info.textContent = 'Hiển thị văn bản mới nhất. Gõ từ khóa để tìm trong cả kho.';
   }
+  var pre = '';
+  if (state.branch) {
+    pre += '<div class="branch-bar"><span>Đang xem <b>' + esc(branchLabel(state.branch)) +
+      '</b> trong cây mã HS</span><a href="#/cay-hs">← Cây mã HS</a><a href="#/">Bỏ lọc nhánh</a></div>';
+  }
+  if (asking) {
+    if (!state.askWeak) {
+      pre += '<h2 class="list-head">Kết quả khớp từ khóa' +
+        (state.query.trim() ? ' “' + esc(state.query.trim()) + '”' : '') + '</h2>';
+    }
+  } else if (state.query && looksLikeDescription(state.query)) {
+    pre += '<p class="mode-hint">Muốn hệ thống gợi ý mã HS từ mô tả? Bấm ' +
+      '<button type="button" class="ask-switch">Hỏi tự nhiên</button></p>';
+  }
   if (!results.length) {
-    view.innerHTML = zeroResultHtml();
+    view.innerHTML = pre + (asking && !state.askWeak
+      ? '<p class="empty">Không có văn bản nào chứa đủ các từ khóa này. Xem các văn bản gợi ý ở phía trên.</p>'
+      : zeroResultHtml());
     wireResultButtons();
     return;
   }
-  var html = '';
+  var html = pre;
   var corr = state.query ? didYouMean(state.query) : null;
   if (corr) {
     html += '<p class="did-you-mean">Có phải bạn muốn tìm: <button type="button" class="dym-btn" data-q="' +
       esc(corr) + '">' + esc(corr) + '</button>?</p>';
   }
   var shown = results.slice(0, state.shown);
-  html += shown.map(cardHtml).join('');
+  if (!asking && !state.branch && detectMode(state.query) === 'code') {
+    var exact = shown.filter(isExactIdHit), rest = shown.filter(function (r) { return !isExactIdHit(r); });
+    if (exact.length) html += '<h2 class="list-head">Khớp chính xác số hiệu / mã HS</h2>' + exact.map(cardHtml).join('');
+    if (rest.length) html += (exact.length ? '<h2 class="list-head">Kết quả khớp từ khóa</h2>' : '') + rest.map(cardHtml).join('');
+  } else {
+    html += shown.map(cardHtml).join('');
+  }
   var rel = relatedSearches(results, currentTokens());
   if (rel.length) {
     html += '<div class="related-search"><span>Tìm kiếm liên quan:</span>' +
@@ -1956,17 +1995,275 @@ function cpRelatedHtml(doc) {
   }).join('') + '</section>';
 }
 
+/* ---------- Cây mã HS + thống kê (tính lười khi mở #/cay-hs) ---------- */
+var HS_SECTIONS = [
+  ['I', 1, 5, 'Động vật sống; các sản phẩm từ động vật'],
+  ['II', 6, 14, 'Các sản phẩm thực vật'],
+  ['III', 15, 15, 'Chất béo và dầu có nguồn gốc từ động vật, thực vật hoặc vi sinh vật'],
+  ['IV', 16, 24, 'Thực phẩm chế biến; đồ uống, rượu và giấm; thuốc lá'],
+  ['V', 25, 27, 'Khoáng sản'],
+  ['VI', 28, 38, 'Sản phẩm của ngành công nghiệp hóa chất hoặc các ngành liên quan'],
+  ['VII', 39, 40, 'Plastic và cao su; các sản phẩm bằng plastic và cao su'],
+  ['VIII', 41, 43, 'Da sống, da thuộc, da lông và sản phẩm của chúng; hàng du lịch, túi xách'],
+  ['IX', 44, 46, 'Gỗ và các mặt hàng bằng gỗ; lie; sản phẩm từ rơm, vật liệu tết bện'],
+  ['X', 47, 49, 'Bột giấy; giấy, bìa và các sản phẩm của chúng; sản phẩm in'],
+  ['XI', 50, 63, 'Nguyên liệu dệt và các sản phẩm dệt'],
+  ['XII', 64, 67, 'Giày dép, mũ, ô dù, ba toong, roi; lông vũ chế biến; hoa nhân tạo'],
+  ['XIII', 68, 70, 'Sản phẩm bằng đá, thạch cao, xi măng, amiăng, mica; đồ gốm, sứ; thủy tinh'],
+  ['XIV', 71, 71, 'Ngọc trai, đá quý, kim loại quý và sản phẩm của chúng; đồ trang sức'],
+  ['XV', 72, 83, 'Kim loại cơ bản và các sản phẩm bằng kim loại cơ bản'],
+  ['XVI', 84, 85, 'Máy và thiết bị cơ khí; máy và thiết bị điện; bộ phận của chúng'],
+  ['XVII', 86, 89, 'Xe cộ, phương tiện bay, tàu thuyền và thiết bị vận tải liên quan'],
+  ['XVIII', 90, 92, 'Dụng cụ quang học, đo lường, y tế; đồng hồ; nhạc cụ'],
+  ['XIX', 93, 93, 'Vũ khí và đạn; bộ phận và phụ kiện của chúng'],
+  ['XX', 94, 96, 'Các mặt hàng khác'],
+  ['XXI', 97, 97, 'Các tác phẩm nghệ thuật, đồ sưu tầm và đồ cổ']
+];
+var HS_CHAPTER_NAMES = {
+  '01': 'Động vật sống', '02': 'Thịt và phụ phẩm dạng thịt ăn được sau giết mổ',
+  '03': 'Cá, động vật giáp xác, thân mềm và thủy sinh khác',
+  '04': 'Sữa, trứng, mật ong và sản phẩm ăn được gốc động vật', '05': 'Sản phẩm gốc động vật khác',
+  '06': 'Cây sống, củ, rễ, hoa cắt và cành lá trang trí', '07': 'Rau và một số loại củ, rễ ăn được',
+  '08': 'Quả và quả hạch ăn được', '09': 'Cà phê, chè và các loại gia vị', '10': 'Ngũ cốc',
+  '11': 'Sản phẩm xay xát; malt; tinh bột; gluten', '12': 'Hạt và quả có dầu; hạt giống; cây công nghiệp, dược liệu',
+  '13': 'Nhựa cánh kiến, gôm, nhựa cây và chiết xuất thực vật', '14': 'Vật liệu thực vật để tết bện; sản phẩm thực vật khác',
+  '15': 'Chất béo và dầu động vật, thực vật', '16': 'Chế phẩm từ thịt, cá, động vật thủy sinh',
+  '17': 'Đường và các loại kẹo đường', '18': 'Ca cao và chế phẩm từ ca cao',
+  '19': 'Chế phẩm từ ngũ cốc, bột, tinh bột hoặc sữa; các loại bánh', '20': 'Chế phẩm từ rau, quả, quả hạch',
+  '21': 'Các chế phẩm ăn được khác', '22': 'Đồ uống, rượu và giấm', '23': 'Phế liệu ngành thực phẩm; thức ăn chăn nuôi',
+  '24': 'Thuốc lá và nguyên liệu thay thế', '25': 'Muối; lưu huỳnh; đất, đá; thạch cao, vôi, xi măng',
+  '26': 'Quặng, xỉ và tro', '27': 'Nhiên liệu khoáng, dầu khoáng và sản phẩm chưng cất', '28': 'Hóa chất vô cơ',
+  '29': 'Hóa chất hữu cơ', '30': 'Dược phẩm', '31': 'Phân bón', '32': 'Thuốc nhuộm, thuốc màu, sơn, véc ni, mực',
+  '33': 'Tinh dầu, nước hoa, mỹ phẩm và chế phẩm vệ sinh', '34': 'Xà phòng, chất hoạt động bề mặt, chế phẩm giặt rửa, bôi trơn, sáp',
+  '35': 'Chất chứa albumin, tinh bột biến tính, keo, enzim', '36': 'Chất nổ, pháo, diêm', '37': 'Vật liệu ảnh, điện ảnh',
+  '38': 'Các sản phẩm hóa chất khác', '39': 'Plastic và sản phẩm bằng plastic', '40': 'Cao su và sản phẩm bằng cao su',
+  '41': 'Da sống và da thuộc', '42': 'Sản phẩm bằng da thuộc; hàng du lịch, túi xách', '43': 'Da lông và da lông nhân tạo',
+  '44': 'Gỗ và mặt hàng bằng gỗ; than củi', '45': 'Lie và sản phẩm bằng lie', '46': 'Sản phẩm từ rơm, cỏ giấy, song mây',
+  '47': 'Bột giấy; giấy loại thu hồi', '48': 'Giấy và bìa; sản phẩm bằng giấy, bìa', '49': 'Sách, báo, tranh ảnh và sản phẩm in',
+  '50': 'Tơ tằm', '51': 'Lông cừu, lông động vật', '52': 'Bông', '53': 'Xơ dệt gốc thực vật khác',
+  '54': 'Sợi filament nhân tạo', '55': 'Xơ sợi staple nhân tạo', '56': 'Mền xơ, phớt, vải không dệt; sợi xe, thừng, cáp',
+  '57': 'Thảm và hàng dệt trải sàn', '58': 'Vải dệt thoi đặc biệt, ren, hàng thêu',
+  '59': 'Vải dệt đã ngâm tẩm, tráng, phủ, ép lớp; hàng dệt dùng trong công nghiệp', '60': 'Vải dệt kim hoặc móc',
+  '61': 'Quần áo dệt kim hoặc móc', '62': 'Quần áo không dệt kim hoặc móc', '63': 'Hàng dệt hoàn thiện khác; quần áo cũ',
+  '64': 'Giày, dép và bộ phận', '65': 'Mũ và vật đội đầu', '66': 'Ô, dù, ba toong, roi', '67': 'Lông vũ chế biến; hoa nhân tạo; tóc người',
+  '68': 'Sản phẩm bằng đá, thạch cao, xi măng, amiăng, mica', '69': 'Đồ gốm, sứ', '70': 'Thủy tinh và sản phẩm bằng thủy tinh',
+  '71': 'Ngọc trai, đá quý, kim loại quý; đồ trang sức', '72': 'Sắt và thép', '73': 'Sản phẩm bằng sắt hoặc thép',
+  '74': 'Đồng và sản phẩm bằng đồng', '75': 'Niken và sản phẩm bằng niken', '76': 'Nhôm và sản phẩm bằng nhôm',
+  '78': 'Chì và sản phẩm bằng chì', '79': 'Kẽm và sản phẩm bằng kẽm', '80': 'Thiếc và sản phẩm bằng thiếc',
+  '81': 'Kim loại cơ bản khác; gốm kim loại', '82': 'Dụng cụ, dao, kéo, bộ đồ ăn bằng kim loại cơ bản',
+  '83': 'Hàng tạp hóa bằng kim loại cơ bản', '84': 'Máy và thiết bị cơ khí; bộ phận của chúng',
+  '85': 'Máy và thiết bị điện; bộ phận của chúng', '86': 'Đầu máy, toa xe lửa; thiết bị đường sắt',
+  '87': 'Xe cộ (trừ đường sắt) và bộ phận, phụ kiện', '88': 'Phương tiện bay, tàu vũ trụ', '89': 'Tàu thủy, thuyền và kết cấu nổi',
+  '90': 'Dụng cụ quang học, đo lường, kiểm tra, y tế', '91': 'Đồng hồ và bộ phận', '92': 'Nhạc cụ',
+  '93': 'Vũ khí và đạn', '94': 'Đồ nội thất; bộ đồ giường, đệm; đèn; nhà lắp ghép', '95': 'Đồ chơi, thiết bị trò chơi, dụng cụ thể thao',
+  '96': 'Các mặt hàng khác', '97': 'Tác phẩm nghệ thuật, đồ sưu tầm, đồ cổ'
+};
+function sectionOfChapter(ch) {
+  var n = +ch;
+  for (var i = 0; i < HS_SECTIONS.length; i++) {
+    if (n >= HS_SECTIONS[i][1] && n <= HS_SECTIONS[i][2]) return HS_SECTIONS[i];
+  }
+  return null;
+}
+function inBranch(d, br) {
+  var dg = hsDigits(d.ma_hs);
+  if (br.type === 'nhom') return dg.length >= 4 && dg.slice(0, 4) === br.key;
+  if (dg.length < 2) return false;
+  var s = sectionOfChapter(dg.slice(0, 2));
+  return !!s && s[0] === br.key;
+}
+function branchLabel(br) {
+  if (br.type === 'nhom') return 'Nhóm ' + br.key;
+  var s = HS_SECTIONS.filter(function (x) { return x[0] === br.key; })[0];
+  return 'Phần ' + br.key + (s ? ' (Chương ' + pad2(s[1]) + (s[2] !== s[1] ? '–' + pad2(s[2]) : '') + ')' : '');
+}
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+var _hsTree = null, _hsTreeOf = null;
+function hsTreeData() {
+  if (_hsTree && _hsTreeOf === DOCS) return _hsTree;
+  var secs = HS_SECTIONS.map(function (s) { return { id: s[0], from: s[1], to: s[2], name: s[3], n: 0, ch: {} }; });
+  var other = { id: '', name: 'Chương khác', n: 0, ch: {} }, noHs = 0;
+  DOCS.forEach(function (d) {
+    var dg = hsDigits(d.ma_hs);
+    if (dg.length < 2) { noHs++; return; }
+    var c = dg.slice(0, 2), s = sectionOfChapter(c), sec = s ? secs[HS_SECTIONS.indexOf(s)] : other;
+    sec.n++;
+    var ch = sec.ch[c] = sec.ch[c] || { id: c, n: 0, h: {} };
+    ch.n++;
+    if (dg.length >= 4) ch.h[dg.slice(0, 4)] = (ch.h[dg.slice(0, 4)] || 0) + 1;
+  });
+  if (other.n) secs.push(other);
+  _hsTree = { secs: secs, noHs: noHs };
+  _hsTreeOf = DOCS;
+  return _hsTree;
+}
+var _treeOpen = {};
+function treeNodeHtml(id, label, count, href, childrenHtml) {
+  var open = !!_treeOpen[id], hasKids = !!childrenHtml;
+  return '<li class="tree-node' + (count ? '' : ' is-empty') + '"><div class="tree-row">' +
+    (hasKids ? '<button type="button" class="tree-toggle" data-node="' + id + '" aria-expanded="' + open +
+      '" aria-controls="tn-' + id + '" aria-label="' + (open ? 'Thu gọn' : 'Mở rộng') + '">' + (open ? '−' : '+') + '</button>'
+      : '<span class="tree-spacer"></span>') +
+    (count ? '<a class="tree-link" href="' + href + '">' : '<span class="tree-link">') +
+    '<span class="tree-name">' + label + '</span><span class="tree-count">' + count + '</span>' +
+    (count ? '</a>' : '</span>') + '</div>' +
+    (hasKids ? '<ul id="tn-' + id + '"' + (open ? '' : ' hidden') + '>' + childrenHtml + '</ul>' : '') + '</li>';
+}
+function hsTreeHtml() {
+  var t = hsTreeData();
+  var html = t.secs.map(function (sec) {
+    var kids = Object.keys(sec.ch).sort().map(function (c) {
+      var ch = sec.ch[c];
+      var hk = Object.keys(ch.h).sort().map(function (h) {
+        return treeNodeHtml('h' + h, '<b>Nhóm ' + h + '</b>', ch.h[h], '#/nhanh/nhom/' + h, '');
+      }).join('');
+      return treeNodeHtml('c' + c, '<b>Chương ' + c + '</b> · ' + esc(HS_CHAPTER_NAMES[c] || ''), ch.n, '#/chuong/' + c, hk);
+    }).join('');
+    var label = sec.id ? '<b>Phần ' + sec.id + '</b> · ' + esc(sec.name) +
+      ' <small>(Chương ' + pad2(sec.from) + (sec.to !== sec.from ? '–' + pad2(sec.to) : '') + ')</small>' : '<b>' + esc(sec.name) + '</b>';
+    return treeNodeHtml('s' + (sec.id || 'x'), label, sec.n, sec.id ? '#/nhanh/phan/' + sec.id : '#/chuong', kids);
+  }).join('');
+  html += treeNodeHtml('none', '<b>Chưa có mã HS</b>', t.noHs, '#/chuong/khong-co-ma', '');
+  return '<ul class="hs-tree">' + html + '</ul>';
+}
+function docLoaiKey(d) { return d.loai === 'phan_tich_phan_loai' || d.loai === 'xac_dinh_truoc_ma_so' ? d.loai : 'khac'; }
+var _stats = null, _statsOf = null;
+function statsData() {
+  if (_stats && _statsOf === DOCS) return _stats;
+  var st = { total: DOCS.length, withHs: 0, loai: { phan_tich_phan_loai: 0, xac_dinh_truoc_ma_so: 0, khac: 0 },
+    years: {}, months: {}, chapters: {}, newest: [] };
+  var latest = 0;
+  DOCS.forEach(function (d) {
+    var dg = hsDigits(d.ma_hs);
+    if (dg.length >= 2) { st.withHs++; st.chapters[dg.slice(0, 2)] = (st.chapters[dg.slice(0, 2)] || 0) + 1; }
+    st.loai[docLoaiKey(d)]++;
+    var t = parseDate(d.ngay);
+    if (!t) return;
+    var dt = new Date(t), y = dt.getFullYear(), mk = y + '-' + pad2(dt.getMonth() + 1);
+    st.years[y] = (st.years[y] || 0) + 1;
+    st.months[mk] = (st.months[mk] || 0) + 1;
+    if (t > latest) latest = t;
+  });
+  var end = new Date(Math.max(latest, Date.now()));
+  st.monthList = [];
+  for (var i = 11; i >= 0; i--) {
+    var m = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    var k = m.getFullYear() + '-' + pad2(m.getMonth() + 1);
+    st.monthList.push({ k: k, label: pad2(m.getMonth() + 1) + '/' + String(m.getFullYear()).slice(2), n: st.months[k] || 0 });
+  }
+  st.topCh = Object.keys(st.chapters).map(function (c) { return { c: c, n: st.chapters[c] }; })
+    .sort(function (a, b) { return b.n - a.n || (a.c < b.c ? -1 : 1); }).slice(0, 10);
+  st.newest = DOCS.slice().sort(function (a, b) { return parseDate(b.ngay) - parseDate(a.ngay); }).slice(0, 10);
+  _stats = st; _statsOf = DOCS;
+  return st;
+}
+function hbarHtml(rows) {
+  var max = Math.max.apply(null, rows.map(function (r) { return r.n; }).concat([1]));
+  return rows.map(function (r) {
+    var w = Math.max(1, Math.round(r.n / max * 100));
+    var inner = '<span class="hbar-label" title="' + esc(r.title || r.label) + '">' + r.label + '</span>' +
+      '<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="1" height="10" rx="2" width="' + w + '"></rect></svg>' +
+      '<span class="hbar-n">' + r.n + '</span>';
+    return r.href ? '<a class="hbar-row" href="' + r.href + '">' + inner + '</a>' : '<div class="hbar-row">' + inner + '</div>';
+  }).join('');
+}
+function monthChartSvg(list) {
+  var W = 360, H = 170, top = 18, bottom = 30, gap = 6, bw = (W - gap * 13) / 12;
+  var max = Math.max.apply(null, list.map(function (m) { return m.n; }).concat([1]));
+  var svg = '<svg class="month-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Số văn bản theo tháng, 12 tháng gần nhất">';
+  svg += '<line x1="0" x2="' + W + '" y1="' + (H - bottom) + '" y2="' + (H - bottom) + '" stroke="#d9e1e8"></line>';
+  list.forEach(function (m, i) {
+    var h = Math.round(m.n / max * (H - top - bottom)), x = gap + i * (bw + gap), y = H - bottom - h;
+    svg += '<g><title>Tháng ' + m.label + ': ' + m.n + ' văn bản</title>' +
+      '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + bw.toFixed(1) + '" height="' + h + '" rx="3"' +
+      (i === list.length - 1 ? ' class="is-last"' : '') + '></rect>' +
+      '<text class="v" x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 4) + '" text-anchor="middle">' + m.n + '</text>' +
+      '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - bottom + 14) + '" text-anchor="middle">' + m.label + '</text></g>';
+  });
+  return svg + '</svg>';
+}
+function renderTreePage(scrollToStats) {
+  var st = statsData();
+  $('#resultInfo').textContent = '';
+  var pct = st.total ? Math.round(st.withHs / st.total * 100) : 0;
+  var html = '<section class="tree-page"><h1 class="page-title">Cây mã HS &amp; thống kê kho</h1>' +
+    '<p class="cmp-intro">Duyệt kho văn bản theo Phần → Chương → Nhóm của Biểu thuế. Số bên phải là số văn bản trong kho thuộc nhánh đó; ' +
+    'bấm vào tên nhánh để xem danh sách văn bản.</p>' +
+    '<div class="stats-grid" id="thongKe">' +
+    '<div class="stat-card"><b>' + st.total + '</b><span>Tổng số văn bản</span></div>' +
+    '<div class="stat-card"><b>' + st.withHs + '</b><span>Có mã HS (' + pct + '%)</span></div>' +
+    '<div class="stat-card"><b>' + st.loai.phan_tich_phan_loai + '</b><span>Phân tích phân loại</span></div>' +
+    '<div class="stat-card"><b>' + st.loai.xac_dinh_truoc_ma_so + '</b><span>Xác định trước mã số</span></div>' +
+    '<div class="stat-card"><b>' + st.loai.khac + '</b><span>Văn bản khác</span></div></div>' +
+    '<div class="stats-panel"><h2>Cây mã HS</h2><div class="tree-tools">' +
+    '<button type="button" id="treeOpenAll">Mở tất cả</button><button type="button" id="treeCloseAll">Thu gọn tất cả</button></div>' +
+    '<div id="hsTree">' + hsTreeHtml() + '</div></div>' +
+    '<div class="stats-panel"><h2>Số văn bản theo tháng (12 tháng gần nhất)</h2>' + monthChartSvg(st.monthList) + '</div>' +
+    '<div class="stats-cols"><div class="stats-panel"><h2>Top 10 chương được phân loại nhiều nhất</h2>' +
+    hbarHtml(st.topCh.map(function (x) {
+      return { label: 'Chương ' + x.c + ' · ' + esc(HS_CHAPTER_NAMES[x.c] || ''), title: 'Chương ' + x.c + ' · ' + (HS_CHAPTER_NAMES[x.c] || ''),
+        n: x.n, href: '#/chuong/' + x.c };
+    })) + '</div>' +
+    '<div class="stats-panel"><h2>Số văn bản theo năm</h2>' +
+    hbarHtml(Object.keys(st.years).sort().reverse().map(function (y) { return { label: 'Năm ' + y, n: st.years[y] }; })) +
+    '</div></div>' +
+    '<div class="stats-panel"><h2>Mới nhất</h2>' + st.newest.map(function (d) {
+      return '<article class="card"><h3><a href="#/bai/' + d.ma + '">' + esc(d.so_hieu) + '</a></h3><p class="sub">' +
+        esc(d.ngay || '') + ' · ' + loaiBadge(d) + ' ' + hsBadge(d) + '</p><p>' +
+        esc(shortText(d.mat_hang || d.trich_yeu, 140)) + '</p></article>';
+    }).join('') + '</div></section>';
+  var view = $('#view');
+  view.innerHTML = html;
+  function setAll(open) {
+    view.querySelectorAll('.tree-toggle').forEach(function (b) { setNode(b, open); });
+  }
+  function setNode(b, open) {
+    var id = b.getAttribute('data-node'), ul = document.getElementById('tn-' + id);
+    _treeOpen[id] = open;
+    b.setAttribute('aria-expanded', String(open));
+    b.setAttribute('aria-label', open ? 'Thu gọn' : 'Mở rộng');
+    b.textContent = open ? '−' : '+';
+    if (ul) ul.hidden = !open;
+  }
+  $('#hsTree').addEventListener('click', function (e) {
+    var b = e.target.closest('.tree-toggle');
+    if (b) setNode(b, b.getAttribute('aria-expanded') !== 'true');
+  });
+  $('#treeOpenAll').addEventListener('click', function () { setAll(true); });
+  $('#treeCloseAll').addEventListener('click', function () { setAll(false); });
+  updateMeta(null);
+  var t = document.querySelector('title');
+  if (t) t.textContent = 'Cây mã HS & thống kê | Văn bản XNK';
+  if (scrollToStats) { var el = $('#thongKe'); if (el && el.scrollIntoView) el.scrollIntoView(); }
+  else window.scrollTo(0, 0);
+}
+
 /* ================= Định tuyến & khởi động ================= */
 
 function route() {
   var h = location.hash || '#/';
   var m = /^#\/bai\/(\d+)/.exec(h);
   var pb = /^#\/phan-biet(?:\/(\d+)-(\d+))?/.exec(h);
-  document.body.classList.toggle('is-detail', !!m || !!pb);
+  var tree = /^#\/(cay-hs|thong-ke)\/?$/.test(h);
+  document.body.classList.toggle('is-detail', !!m || !!pb || tree);
   if (m) { renderDetail(m[1]); return; }
   if (pb) { if (pb[1]) renderCompare(pb[1], pb[2]); else renderCompareList(); return; }
+  if (tree) { renderTreePage(h.indexOf('thong-ke') !== -1); return; }
+  var nb = /^#\/nhanh\/(phan|nhom)\/([0-9IVX]+)/.exec(h);
+  if (nb) {
+    clearAsk();
+    state.query = ''; state.shown = PAGE_SIZE;
+    var qb = $('#q'); if (qb) qb.value = '';
+    state.branch = { type: nb[1], key: nb[2] };
+    state.chapter = nb[1] === 'nhom' ? nb[2].slice(0, 2) : '';
+    syncFilterControls(); updateModeUi();
+    renderList();
+    return;
+  }
+  state.branch = null;
   var c = /^#\/chuong\/([0-9]{2}|khong-co-ma)/.exec(h);
   if (c) {
+    clearAsk(); updateModeUi();
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
     state.query = '';
     var q = $('#q'); if (q) q.value = '';
@@ -2026,6 +2323,7 @@ function fillFilterOptions() {
 /* Dropdown gợi ý nhóm theo loại + điều hướng bàn phím (chuẩn ARIA combobox:
    ↑/↓ di chuyển, Enter chọn, Esc đóng và khôi phục truy vấn gốc, Tab đóng
    mà không chọn). Khi di chuyển bằng phím, ô nhập hiện tạm gợi ý đang chọn. */
+/* ---------- Ô tra cứu hợp nhất: gợi ý khi gõ (cơ chế bước 3) ---------- */
 var _suggItems = [], _suggActive = -1, _qBeforeNav = '';
 function hideSuggestions() {
   var box = $('#suggest');
@@ -2037,39 +2335,44 @@ function hideSuggestions() {
     q.removeAttribute('aria-activedescendant');
   }
 }
+/* Ô trống: tìm gần đây + tìm nhiều; đang gõ: gợi ý tên hàng, chất liệu, công dụng,
+   mã HS, số hiệu; nếu không có thì dùng gợi ý từ khóa cũ (chương, số hiệu…). */
+function unifiedSuggest(v) {
+  if (!String(v || '').trim()) return suggest('');
+  var items = askSuggest(v);
+  return items.length ? items : suggest(v);
+}
 function showSuggestions() {
-  var box = $('#suggest'), q = $('#q');
+  var box = $('#suggest'), q = $('#q'), status = $('#suggestStatus');
   if (!box || !q) return;
-  var items = suggest(q.value);
+  var atEnd = q.selectionStart == null || q.selectionStart >= q.value.length;
+  var items = atEnd ? unifiedSuggest(q.value) : [];
   _suggItems = items; _suggActive = -1; _qBeforeNav = q.value;
-  var status = $('#suggestStatus');
   if (!items.length) { hideSuggestions(); if (status) status.textContent = ''; return; }
   var html = '', lastGroup = '';
   items.forEach(function (it, i) {
-    if (it.group !== lastGroup) {
+    if (it.group && it.group !== lastGroup) {
       html += '<div class="sugg-group" role="presentation">' + esc(it.group) + '</div>';
       lastGroup = it.group;
     }
-    html += '<button type="button" role="option" id="sugg-' + i + '" data-i="' + i + '">' +
-      esc(it.text) + '<span class="kind">' + esc(it.kind) + '</span></button>';
+    html += '<button type="button" role="option" id="sugg-' + i + '" data-i="' + i + '" tabindex="-1">' +
+      '<span class="sugg-text">' + (it.html || esc(it.text)) + '</span><span class="kind">' +
+      esc(it.kind || '') + '</span></button>';
   });
   box.innerHTML = html;
   box.hidden = false;
   q.setAttribute('aria-expanded', 'true');
   if (status) status.textContent = items.length + ' gợi ý';
-  box.querySelectorAll('button').forEach(function (b) {
-    b.addEventListener('click', function () { activateSuggestion(+b.getAttribute('data-i')); });
-  });
 }
 function markActive(i) {
   _suggActive = i;
   var box = $('#suggest'), q = $('#q');
-  box.querySelectorAll('button').forEach(function (b, j) {
-    b.classList.toggle('active', j === i);
-  });
+  box.querySelectorAll('button').forEach(function (b, j) { b.classList.toggle('active', j === i); });
   if (i >= 0 && _suggItems[i]) {
     q.setAttribute('aria-activedescendant', 'sugg-' + i);
     q.value = _suggItems[i].text;
+    var b = $('#sugg-' + i);
+    if (b && b.scrollIntoView) b.scrollIntoView({ block: 'nearest' });
   } else {
     q.removeAttribute('aria-activedescendant');
     q.value = _qBeforeNav;
@@ -2080,34 +2383,106 @@ function activateSuggestion(i) {
   if (!it) return;
   var q = $('#q');
   hideSuggestions();
-  if (it.action === 'open' && it.ma) { location.hash = '#/bai/' + it.ma; return; }
+  if (it.action === 'open' && it.ma) { q.value = it.text; location.hash = '#/bai/' + it.ma; return; }
   if (it.action === 'chapter' && it.chapter) { location.hash = '#/chuong/' + it.chapter; return; }
   q.value = it.text;
-  commitSearch(it.text);
+  runLookup(it.text);
 }
-/* Chốt một truy vấn: ghi lại lịch sử tìm, đồng bộ URL (?q=), hiển thị. */
-/* Trang riêng (bài viết, so sánh): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
-function onPageRoute() { return /^#\/(bai\/|phan-biet)/.test(location.hash); }
-function commitSearch(text) {
-  state.query = text; state.shown = PAGE_SIZE;
-  recordRecent(text);
+
+/* ---------- Tự chọn chế độ tra cứu ---------- */
+/* Cụm chỉ công dụng / chất liệu: "làm áo thun", "cho ô tô", "pha polyester"… */
+var ASK_CUES = ['làm', 'dùng', 'cho', 'để', 'bằng', 'pha', 'chứa', 'gồm', 'dành'];
+var ASK_CUES_ASCII = ['lam', 'dung', 'cho', 'bang', 'pha', 'chua', 'gom', 'danh'];
+function detectMode(text) {
+  var raw = String(text == null ? '' : text).trim();
+  if (!raw) return 'keyword';
+  var ws = raw.split(/\s+/).filter(function (w) { return norm(w); });
+  if (!ws.length) return 'keyword';
+  if (/^[\d.\s]+$/.test(raw) || (ws.length === 1 && /\d/.test(ws[0]) && /^[\dA-Za-zĐđ.\/-]+$/.test(ws[0]))) return 'code';
+  if (ws.length >= 4) return 'ask';
+  if (ws.length >= 2 && ws.slice(1).some(function (w) {
+    var k = viKey(w);
+    return hasDia(k) ? ASK_CUES.indexOf(k) !== -1 : ASK_CUES_ASCII.indexOf(norm(w)) !== -1;
+  })) return 'ask';
+  return 'keyword';
+}
+function looksLikeDescription(text) {
+  var m = detectMode(text);
+  return m === 'ask' || (m === 'keyword' && String(text).trim().split(/\s+/).length >= 3);
+}
+function clearAsk() {
+  state.mode = 'keyword'; state.askText = ''; state.askWeak = false; state.forced = false;
+  var out = $('#askOut'); if (out) out.innerHTML = '';
+}
+var MODE_LABEL = { keyword: 'Tìm từ khóa', ask: 'Hỏi tự nhiên', code: 'tìm chính xác số hiệu / mã HS' };
+function updateModeUi(pending) {
+  var q = $('#q'), t = q ? q.value.trim() : '';
+  var eff = state.mode === 'ask' ? 'ask' : 'keyword';
+  document.querySelectorAll('.mode-btn').forEach(function (b) {
+    b.setAttribute('aria-pressed', String(!!t && !pending && b.getAttribute('data-mode') === eff));
+  });
+  var note = $('#modeNote');
+  if (!note) return;
+  if (pending === 'ask') note.textContent = 'Có vẻ là câu mô tả: nhấn Enter để hệ thống gợi ý mã HS (Hỏi tự nhiên).';
+  else if (!t) note.textContent = 'Hệ thống tự chọn chế độ theo nội dung bạn gõ.';
+  else if (state.forced) note.textContent = 'Đang dùng chế độ ' + MODE_LABEL[eff] + ' theo lựa chọn của bạn.';
+  else note.textContent = 'Hệ thống tự chọn: ' + MODE_LABEL[state.auto || eff] + '.';
+}
+/* Chạy tra cứu: chế độ Hỏi hiện thẻ trả lời ở trên + danh sách khớp từ khóa bên
+   dưới; chế độ từ khóa / mã số chỉ hiện danh sách. opts.mode ép chế độ. */
+var _inputDeb = null;
+/* Danh sách dưới thẻ trả lời: bỏ dần từ cuối cho tới khi có văn bản chứa đủ các từ còn lại. */
+function askListQuery(kw) {
+  var ws = String(kw || '').trim().split(/\s+/).filter(Boolean);
+  while (ws.length > 1 && !searchDocs(ws.join(' '), {}).length) ws.pop();
+  return ws.join(' ');
+}
+function runLookup(text, opts) {
+  opts = opts || {};
+  clearTimeout(_inputDeb);
+  var t = String(text == null ? '' : text).trim();
+  var auto = detectMode(t), autoMode = auto === 'ask' ? 'ask' : 'keyword';
+  var mode = t ? (opts.mode || autoMode) : 'keyword';
+  state.auto = auto; state.forced = !!opts.mode && !!t && opts.mode !== autoMode;
+  state.mode = mode; state.shown = PAGE_SIZE; state.branch = null;
+  hideSuggestions();
+  if (mode === 'ask') {
+    var ans = renderAsk(t);
+    state.askText = t; state.askWeak = !!ans.weak;
+    state.query = ans.weak ? (ans.keywords || t) : askListQuery(ans.keywords || t);
+  } else {
+    var forced = state.forced;
+    clearAsk(); state.forced = forced;
+    state.query = t;
+  }
+  if (t) recordRecent(t);
   syncQueryToUrl();
-  if (onPageRoute()) location.hash = '#/';
+  updateModeUi();
+  var onPage = onPageRoute() || /^#\/nhanh\//.test(location.hash);
+  if (opts.restore && onPage) return;
+  if (onPage) location.hash = '#/';
   else renderList();
 }
-/* Đưa truy vấn vào URL (?q=) để link tìm kiếm chia sẻ được, nút Back hoạt
-   động, và Cloudflare Web Analytics (đã bật, không cookie) ghi lại top
-   truy vấn thật của độc giả — nguồn duy nhất để cải tiến từ đồng nghĩa
-   và gợi ý theo hành vi thật mà không cần backend. */
+/* Chốt một truy vấn từ khóa (nút "Ý bạn là", tìm kiếm liên quan). */
+/* Trang riêng (bài viết, so sánh, cây HS): tìm kiếm hoặc hỏi xong thì quay về danh sách. */
+function onPageRoute() { return /^#\/(bai\/|phan-biet|cay-hs|thong-ke)/.test(location.hash); }
+function commitSearch(text) {
+  runLookup(text, { mode: 'keyword' });
+}
+/* Đưa truy vấn vào URL để link chia sẻ được, nút Back hoạt động và Cloudflare
+   Web Analytics (không cookie) ghi lại truy vấn thật: ?q= cho từ khóa,
+   ?hoi= cho câu hỏi tự nhiên (giữ tương thích link cũ của cả hai ô). */
 function syncQueryToUrl() {
   try {
     var url = new URL(location.href);
-    if (state.query && state.query.trim()) url.searchParams.set('q', state.query.trim());
-    else url.searchParams.delete('q');
+    url.searchParams.delete('q'); url.searchParams.delete('hoi');
+    if (state.mode === 'ask' && state.askText) url.searchParams.set('hoi', state.askText);
+    else if (state.query && state.query.trim()) url.searchParams.set('q', state.query.trim());
     history.replaceState(null, '', url.pathname + url.search + location.hash);
   } catch (e) { /* trình duyệt quá cũ: bỏ qua */ }
 }
 
+function confClass(level) { return level === 3 ? 'conf-high' : level === 2 ? 'conf-mid' : 'conf-low'; }
 /* Khối trả lời "Hỏi bằng tiếng Việt tự nhiên". */
 function confClass(level) { return level === 3 ? 'conf-high' : level === 2 ? 'conf-mid' : 'conf-low'; }
 function askResultHtml(r, n) {
@@ -2132,11 +2507,9 @@ function askResultHtml(r, n) {
 function renderAsk(question, opts) {
   opts = opts || {};
   var out = $('#askOut');
-  var onDetail = onPageRoute();
-  if (!out) return;
   question = String(question || '').trim();
-  if (!question) { out.innerHTML = ''; return; }
   var ans = askDocs(question);
+  if (!out) return ans;
   var html = '<div class="ask-answer"><p class="disclaimer" role="note">' + esc(NL_DISCLAIMER) + '</p>';
   if (ans.weak) {
     html += '<p class="ask-fallback">Chưa tìm được văn bản đủ khớp với mô tả “' + esc(question) + '”. ' +
@@ -2155,139 +2528,13 @@ function renderAsk(question, opts) {
       }).join('') + '</p>';
     }
     html += '<ol class="ask-list">' + ans.results.map(function (r, i) { return askResultHtml(r, i + 1); }).join('') + '</ol>';
+    html += '<p class="ask-filter-note">Bộ lọc loại văn bản, chương, năm chỉ áp dụng cho danh sách khớp từ khóa bên dưới; ' +
+      'các văn bản gợi ý ở đây không bị lọc.</p>';
   }
   html += '</div>';
   out.innerHTML = html;
-  /* Câu hỏi khôi phục từ URL không được đẩy người đọc rời trang văn bản. */
-  if (opts.restore && onDetail) return;
-  if (ans.weak) {
-    var q = $('#q');
-    if (q) q.value = ans.keywords || question;
-    commitSearch(ans.keywords || question);
-  } else if (onDetail) {
-    location.hash = '#/';
-  }
+  return ans;
 }
-/* Dropdown gợi ý của ô hỏi (ARIA combobox như ô từ khóa): ↑/↓ chọn và hiện tạm
-   gợi ý trong ô, Enter hoặc bấm để hỏi ngay, Esc đóng và trả lại phần đã gõ. */
-var _askItems = [], _askActive = -1, _askTyped = '';
-function hideAskSuggest() {
-  var box = $('#askSuggest'), input = $('#ask');
-  if (box) { box.hidden = true; box.innerHTML = ''; }
-  _askItems = []; _askActive = -1;
-  if (input) { input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
-}
-function showAskSuggest() {
-  var box = $('#askSuggest'), input = $('#ask'), status = $('#askSuggestStatus');
-  if (!box || !input) return;
-  var atEnd = input.selectionStart == null || input.selectionStart >= input.value.length;
-  var items = atEnd ? askSuggest(input.value) : [];
-  _askItems = items; _askActive = -1; _askTyped = input.value;
-  if (!items.length) { hideAskSuggest(); if (status) status.textContent = ''; return; }
-  box.innerHTML = items.map(function (it, i) {
-    return '<button type="button" role="option" id="ask-sugg-' + i + '" data-i="' + i + '" tabindex="-1">' +
-      '<span class="sugg-text">' + it.html + '</span><span class="kind">' + esc(it.kind) + '</span></button>';
-  }).join('');
-  box.hidden = false;
-  input.setAttribute('aria-expanded', 'true');
-  if (status) status.textContent = items.length + ' gợi ý';
-}
-function markAskActive(i) {
-  var box = $('#askSuggest'), input = $('#ask');
-  _askActive = i;
-  box.querySelectorAll('button').forEach(function (b, j) { b.classList.toggle('active', j === i); });
-  if (i >= 0 && _askItems[i]) {
-    input.setAttribute('aria-activedescendant', 'ask-sugg-' + i);
-    input.value = _askItems[i].text;
-    var b = $('#ask-sugg-' + i);
-    if (b && b.scrollIntoView) b.scrollIntoView({ block: 'nearest' });
-  } else {
-    input.removeAttribute('aria-activedescendant');
-    input.value = _askTyped;
-  }
-}
-function activateAskSuggest(i) {
-  var it = _askItems[i], input = $('#ask');
-  if (!it) return;
-  hideAskSuggest();
-  input.value = it.text;
-  if (it.action === 'open' && it.ma) { location.hash = '#/bai/' + it.ma; return; }
-  renderAsk(it.text);
-  syncAskToUrl(it.text);
-}
-function wireAsk() {
-  var form = $('#askForm'), input = $('#ask'), box = $('#askSuggest');
-  if (!form || !input) return;
-  if (box) {
-    var deb = null;
-    input.addEventListener('input', function () {
-      clearTimeout(deb);
-      deb = setTimeout(showAskSuggest, 80);
-    });
-    /* Dựng sẵn bộ gợi ý khi người dùng chạm vào ô, không làm chậm lần tải trang. */
-    input.addEventListener('focus', function () { setTimeout(askPool, 0); }, { once: true });
-    input.addEventListener('keydown', function (e) {
-      if (e.isComposing) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (box.hidden) showAskSuggest();
-        if (!_askItems.length) return;
-        e.preventDefault();
-        markAskActive(e.key === 'ArrowDown'
-          ? (_askActive + 1 >= _askItems.length ? -1 : _askActive + 1)
-          : (_askActive <= -1 ? _askItems.length - 1 : _askActive - 1));
-      } else if (e.key === 'Enter') {
-        if (!box.hidden && _askActive >= 0) { e.preventDefault(); activateAskSuggest(_askActive); }
-        else hideAskSuggest(); /* Enter không chọn gợi ý: hỏi đúng câu đã gõ. */
-      } else if (e.key === 'Escape') {
-        if (!box.hidden) { e.preventDefault(); input.value = _askTyped; hideAskSuggest(); }
-      } else if (e.key === 'Tab') {
-        hideAskSuggest();
-      }
-    });
-    /* mousedown giữ con trỏ trong ô; click mới chọn (chạm trên điện thoại cũng vậy). */
-    box.addEventListener('mousedown', function (e) { e.preventDefault(); });
-    box.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-i]');
-      if (b) activateAskSuggest(+b.getAttribute('data-i'));
-    });
-    document.addEventListener('click', function (e) {
-      if (!box.hidden && !e.target.closest('.ask-row')) hideAskSuggest();
-    });
-  }
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    hideAskSuggest();
-    renderAsk(input.value);
-    syncAskToUrl(input.value);
-  });
-  document.querySelectorAll('.ask-chip').forEach(function (b) {
-    b.addEventListener('click', function () {
-      input.value = b.getAttribute('data-ask');
-      hideAskSuggest();
-      renderAsk(input.value);
-      syncAskToUrl(input.value);
-    });
-  });
-  $('#askOut').addEventListener('click', function (e) {
-    var a = e.target.closest('a[href^="#/bai/"]');
-    if (!a) return;
-    var m = /^#\/bai\/(\d+)/.exec(a.getAttribute('href') || '');
-    if (m) recordClick(m[1]);
-  });
-  try {
-    var initial = new URLSearchParams(location.search).get('hoi');
-    if (initial) { input.value = initial; renderAsk(initial, { restore: true }); }
-  } catch (e) { /* bỏ qua */ }
-}
-function syncAskToUrl(text) {
-  try {
-    var url = new URL(location.href);
-    if (text && text.trim()) url.searchParams.set('hoi', text.trim());
-    else url.searchParams.delete('hoi');
-    history.replaceState(null, '', url.pathname + url.search + location.hash);
-  } catch (e) { /* bỏ qua */ }
-}
-
 function boot() {
   Promise.all([
     fetch('data.json').then(function (r) { return r.json(); }),
@@ -2303,56 +2550,82 @@ function boot() {
     if (upd) upd.textContent = META.generated_at_display || '—';
     fillFilterOptions();
 
-    var q = $('#q');
-    /* Truy vấn mở sẵn từ link chia sẻ (?q=...). */
+    var q = $('#q'), box = $('#suggest'), form = $('#searchForm');
+    /* Link chia sẻ cũ: ?q= (từ khóa) và ?hoi= (câu hỏi tự nhiên). */
+    var initialQ = '', initialHoi = '';
     try {
-      var initialQ = new URLSearchParams(location.search).get('q');
-      if (initialQ) { q.value = initialQ; state.query = initialQ; }
+      var sp = new URLSearchParams(location.search);
+      initialQ = sp.get('q') || ''; initialHoi = sp.get('hoi') || '';
     } catch (e) { /* bỏ qua */ }
-    var deb = null;
+    if (initialHoi) q.value = initialHoi;
+    else if (initialQ) { q.value = initialQ; state.query = initialQ; state.auto = detectMode(initialQ); }
     q.addEventListener('input', function () {
-      clearTimeout(deb);
-      deb = setTimeout(function () {
-        state.query = q.value; state.shown = PAGE_SIZE;
-        syncQueryToUrl();
+      clearTimeout(_inputDeb);
+      _inputDeb = setTimeout(function () {
         showSuggestions();
-        if (onPageRoute()) location.hash = '#/';
+        var v = q.value;
+        /* Đang gõ một câu mô tả: chờ Enter mới hỏi, không làm mới danh sách liên tục. */
+        if (detectMode(v) === 'ask') { updateModeUi('ask'); return; }
+        clearAsk();
+        state.auto = detectMode(v); state.query = v; state.shown = PAGE_SIZE; state.branch = null;
+        syncQueryToUrl(); updateModeUi();
+        if (onPageRoute() || /^#\/nhanh\//.test(location.hash)) location.hash = '#/';
         else renderList();
       }, 150);
     });
+    /* Dựng sẵn bộ gợi ý khi người dùng chạm vào ô, không làm chậm lần tải trang. */
+    q.addEventListener('focus', function () { setTimeout(askPool, 0); }, { once: true });
     q.addEventListener('focus', function () {
       if (!q.value.trim()) showSuggestions(); /* ô trống: "Tìm nhiều" + gần đây */
     });
     q.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        if ($('#suggest').hidden) { showSuggestions(); }
+        if (box.hidden) showSuggestions();
         if (!_suggItems.length) return;
-        var next = e.key === 'ArrowDown'
-          ? (_suggActive + 1) % _suggItems.length
-          : (_suggActive - 1 + _suggItems.length) % _suggItems.length;
-        markActive(next);
+        e.preventDefault();
+        markActive(e.key === 'ArrowDown'
+          ? (_suggActive + 1 >= _suggItems.length ? -1 : _suggActive + 1)
+          : (_suggActive <= -1 ? _suggItems.length - 1 : _suggActive - 1));
       } else if (e.key === 'Enter') {
-        hideSuggestions();
-        commitSearch(q.value);
+        /* Enter khi đang chọn gợi ý: chạy gợi ý đó; không thì form submit tra đúng câu đã gõ. */
+        if (!box.hidden && _suggActive >= 0) { e.preventDefault(); activateSuggestion(_suggActive); }
+        else hideSuggestions();
       } else if (e.key === 'Escape') {
-        /* Ngăn hành vi mặc định của Chrome với input type=search (Esc xóa
-           sạch ô nhập). Chỉ xử lý khi dropdown đang mở; dropdown đã đóng
-           thì Esc không làm gì (tránh khôi phục nhầm truy vấn cũ). */
+        /* Chặn Chrome xóa sạch ô type=search; Esc chỉ đóng gợi ý và trả lại phần đã gõ. */
         e.preventDefault();
         e.stopPropagation();
-        if (!$('#suggest').hidden) {
-          hideSuggestions();
-          q.value = _qBeforeNav;
-          state.query = _qBeforeNav; state.shown = PAGE_SIZE;
-          syncQueryToUrl();
-          renderList();
-        }
+        if (!box.hidden) { q.value = _qBeforeNav; hideSuggestions(); }
+      } else if (e.key === 'Tab') {
+        hideSuggestions();
       }
     });
+    /* mousedown giữ con trỏ trong ô; click mới chọn (chạm trên điện thoại cũng vậy). */
+    box.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    box.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-i]');
+      if (b) activateSuggestion(+b.getAttribute('data-i'));
+    });
     document.addEventListener('click', function (e) {
-      var box = $('#suggest');
-      if (box && !box.hidden && !e.target.closest('.search-box')) hideSuggestions();
+      if (!box.hidden && !e.target.closest('.ask-row')) hideSuggestions();
+    });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      runLookup(q.value);
+    });
+    document.querySelectorAll('.mode-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var t = q.value.trim() || state.askText || state.query.trim();
+        if (!t) { q.focus(); return; }
+        q.value = t;
+        runLookup(t, { mode: b.getAttribute('data-mode') });
+      });
+    });
+    $('#askOut').addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="#/bai/"]');
+      if (!a) return;
+      var m = /^#\/bai\/(\d+)/.exec(a.getAttribute('href') || '');
+      if (m) recordClick(m[1]);
     });
     /* Ghi lại lượt mở văn bản (tín hiệu hạng nhẹ trên máy này) + lịch sử tìm. */
     document.getElementById('view').addEventListener('click', function (e) {
@@ -2365,15 +2638,20 @@ function boot() {
     /* Nút Back/Forward của trình duyệt: khôi phục truy vấn từ URL. */
     window.addEventListener('popstate', function () {
       try {
-        var pq = new URLSearchParams(location.search).get('q') || '';
-        q.value = pq; state.query = pq; state.shown = PAGE_SIZE;
+        var sp2 = new URLSearchParams(location.search);
+        var ph = sp2.get('hoi') || '', pq = sp2.get('q') || '';
+        if (ph) {
+          if (ph !== state.askText) { q.value = ph; runLookup(ph, { mode: 'ask', restore: true }); }
+        } else if (state.mode !== 'ask' || state.askText) {
+          clearAsk(); q.value = pq; state.query = pq; state.shown = PAGE_SIZE;
+        }
       } catch (e) { /* bỏ qua */ }
       route();
     });
-    document.querySelectorAll('.chip').forEach(function (c) {
+    document.querySelectorAll('.lookup-box .chip').forEach(function (c) {
       c.addEventListener('click', function () {
         q.value = c.getAttribute('data-q');
-        commitSearch(q.value);
+        runLookup(q.value);
       });
     });
     $('#fLoai').addEventListener('change', function (e) {
@@ -2387,7 +2665,8 @@ function boot() {
     });
     $('#clearFilters').addEventListener('click', function () {
       state.loai = ''; state.chapter = ''; state.year = ''; state.query = '';
-      q.value = ''; state.shown = PAGE_SIZE;
+      q.value = ''; state.shown = PAGE_SIZE; state.branch = null;
+      clearAsk(); updateModeUi();
       syncFilterControls();
       syncQueryToUrl();
       if (location.hash && location.hash !== '#/') location.hash = '#/';
@@ -2396,7 +2675,8 @@ function boot() {
 
     window.addEventListener('hashchange', route);
     route();
-    wireAsk();
+    if (initialHoi) runLookup(initialHoi, { mode: 'ask', restore: true });
+    updateModeUi();
   }).catch(function (err) {
     document.getElementById('view').innerHTML =
       '<p class="empty">Không tải được dữ liệu kho (data.json). ' +
