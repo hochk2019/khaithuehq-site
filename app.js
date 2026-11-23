@@ -2256,7 +2256,7 @@ function route() {
     var qb = $('#q'); if (qb) qb.value = '';
     state.branch = { type: nb[1], key: nb[2] };
     state.chapter = nb[1] === 'nhom' ? nb[2].slice(0, 2) : '';
-    syncFilterControls(); updateModeUi();
+    syncQueryToUrl(); syncFilterControls(); updateModeUi();
     renderList();
     return;
   }
@@ -2265,6 +2265,7 @@ function route() {
   if (c) {
     clearAsk(); updateModeUi();
     state.chapter = c[1] === 'khong-co-ma' ? '' : c[1];
+    state.query = ''; syncQueryToUrl();
     state.query = '';
     var q = $('#q'); if (q) q.value = '';
     if (c[1] === 'khong-co-ma') {
