@@ -1,16 +1,16 @@
 {
-  "generated_at": "2026-11-25T06:14:12+07:00",
-  "generated_at_display": "25/11/2026 06:14",
-  "total": 522,
-  "with_hs": 497,
+  "generated_at": "2026-11-26T06:14:09+07:00",
+  "generated_at_display": "26/11/2026 06:14",
+  "total": 523,
+  "with_hs": 498,
   "counts_by_loai": {
-    "xac_dinh_truoc_ma_so": 391,
+    "xac_dinh_truoc_ma_so": 392,
     "khac": 46,
     "phan_tich_phan_loai": 85
   },
   "counts_by_year": {
     "2025": 258,
-    "2026": 264
+    "2026": 265
   },
-  "drive_mapped": 506
+  "drive_mapped": 507
 }
